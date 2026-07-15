@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=initial-scale=1.0">
+<title>パル配合ルート検索 | Palworld Breeding Helper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<style>
+  /* ---- 検証済みパレット(dataviz skill準拠)。蛍光色・グラデーションは使わない ---- */
+  :root {
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --surface-sunken: #f1f0ed;
+    --border: rgba(11, 11, 11, 0.10);
+    --border-strong: rgba(11, 11, 11, 0.22);
+    --ink-primary: #0b0b0b;
+    --ink-secondary: #52514e;
+    --ink-muted: #898781;
+
+    --accent: #2a78d6;       /* categorical slot 1 (blue) */
+    --accent-ink: #ffffff;
+    --accent-ring: rgba(42, 120, 214, 0.35);
+
+    --status-good: #0ca30c;
+    --status-good-ink: #ffffff;
+    --status-warning: #a86400;  /* warningの地色は明度が高いため、文字用に濃くした版 */
+    --status-serious: #b8532f;
+    --status-critical: #d03b3b;
+
+    /* categorical(再利用パルの色分け用)。固定順、循環させない */
+    --cat-1: #2a78d6; --cat-2: #1baf7a; --cat-3: #c98500; --cat-4: #008300;
+    --cat-5: #4a3aa7; --cat-6: #e34948; --cat-7: #d5518a; --cat-8: #d95926;
+  }
+
+  :root[data-theme="dark"] {
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-sunken: #141413;
+    --border: rgba(255, 255, 255, 0.11);
+    --border-strong: rgba(255, 255, 255, 0.22);
+    --ink-primary: #ffffff;
+    --ink-secondary: #c3c2b7;
+    --ink-muted: #898781;
+
+    --accent: #3987e5;
+    --accent-ink: #ffffff;
+    --accent-ring: rgba(57, 135, 229, 0.4);
+
+    --status-good: #0ca30c;
+    --status-warning: #c98500;
+    --status-serious: #ec835a;
+    --status-critical: #e66767;
+
+    --cat-1: #3987e5; --cat-2: #199e70; --cat-3: #c98500; --cat-4: #008300;
+    --cat-5: #9085e9; --cat-6: #e66767; --cat-7: #d55181; --cat-8: #d95926;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0; padding: 40px 20px;
+    background: var(--page);
+    color: var(--ink-primary);
+    font-family: 'Yu Gothic UI', 'Segoe UI', 'Meiryo', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    max-width: 880px; margin-inline: auto;
+    min-height: 100vh;
+    line-height: 1.65;
+  }
+
+  header { margin-bottom: 32px; }
+
+  h1 {
+    font-size: 1.7rem;
+    font-weight: 700;
+    margin: 0 0 8px;
+    color: var(--ink-primary);
+    letter-spacing: -0.01em;
+  }
+
+  .subtitle {
+    color: var(--ink-secondary);
+    font-size: 0.98rem;
+    max-width: 620px;
+    font-weight: 400;
+  }
+
+  .sort-toggle-btn {
+    background: var(--surface);
+    color: var(--ink-secondary);
+    border: 1px solid var(--border-strong);
+    padding: 5px 14px;
+    font-size: 0.82rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .sort-toggle-btn:hover { background: var(--surface-sunken); }
+  .sort-toggle-btn.on {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-color: var(--accent);
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+
+  .card h2 {
+    font-size: 1.05rem;
+    margin: 0 0 16px;
+    font-weight: 700;
+    color: var(--ink-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
+  }
+
+  select, button, input, textarea {
+    font-family: inherit;
+    font-size: 0.92rem;
+    padding: 9px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--ink-primary);
+    outline: none;
+    font-weight: 500;
+  }
+  select:focus, input:focus, textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-ring);
+  }
+
+  button {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border: 1px solid var(--accent);
+    cursor: pointer;
+    font-weight: 700;
+  }
+  button:hover { filter: brightness(0.92); }
+  button:active { filter: brightness(0.85); }
+  button.secondary {
+    background: var(--surface);
+    color: var(--ink-primary);
+    border: 1px solid var(--border-strong);
+  }
+  button.secondary:hover { background: var(--surface-sunken); }
+  button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    filter: none !important;
+  }
+
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+  .hint { font-size: 0.9rem; color: var(--ink-secondary); line-height: 1.7; }
+
+  .owned-search {
+    width: 100%;
+    margin-bottom: 12px;
+    padding: 11px 16px;
+    font-size: 0.95rem;
+  }
+
+  .owned-toggle-list {
+    display: flex; flex-wrap: wrap; gap: 8px; max-height: 280px; overflow-y: auto;
+    padding: 12px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--surface-sunken);
+  }
+
+  .owned-toggle {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border-strong);
+    cursor: pointer;
+    font-size: 0.88rem;
+    font-weight: 600;
+    white-space: nowrap;
+    background: var(--surface);
+    color: var(--ink-primary);
+  }
+  .owned-toggle:hover { background: var(--surface-sunken); border-color: var(--ink-muted); }
+  .owned-toggle.on {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-color: var(--accent);
+    font-weight: 700;
+  }
+  .owned-toggle.on:hover { filter: brightness(0.92); }
+
+  .owned-count {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--ink-secondary);
+    margin-top: 10px;
+    display: inline-block;
+  }
+
+  /* ---- Result styling ---- */
+  .route-step {
+    display: flex; align-items: center; gap: 14px; padding: 13px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .route-step:last-child { border-bottom: none; }
+
+  .route-gen-badge {
+    flex-shrink: 0; width: 28px; height: 28px; border-radius: 6px;
+    background: var(--surface-sunken); color: var(--ink-secondary);
+    border: 1px solid var(--border-strong);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.82rem; font-weight: 700;
+  }
+
+  .route-formula {
+    flex: 1;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    color: var(--ink-secondary);
+  }
+
+  .pal-tag {
+    font-weight: 700;
+    cursor: pointer;
+    padding: 4px 11px;
+    border-radius: 6px;
+    color: var(--ink-primary);
+  }
+  .pal-tag-owned {
+    color: var(--status-good-ink, #ffffff);
+    background: var(--status-good);
+  }
+  .pal-tag-bred {
+    color: var(--ink-primary);
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-strong);
+  }
+  .pal-tag-bred:hover { background: var(--surface); border-color: var(--ink-muted); }
+
+  .route-legend {
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
+    font-size: 0.85rem; color: var(--ink-secondary);
+    margin-bottom: 14px; padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .legend-item { display: flex; align-items: center; gap: 7px; }
+  .legend-swatch {
+    display: inline-block; width: 13px; height: 13px; border-radius: 4px;
+  }
+  .legend-owned { background: var(--status-good); }
+  .legend-bred { background: var(--surface-sunken); border: 1px solid var(--border-strong); }
+
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+  }
+  .badge.exact { background: var(--status-good); color: #ffffff; }
+  .badge.approx-exact { background: var(--status-warning); color: #ffffff; }
+  .badge.approx { background: var(--surface-sunken); color: var(--ink-secondary); border: 1px solid var(--border-strong); }
+
+  .result-summary { font-size: 1.05rem; font-weight: 700; margin-bottom: 16px; color: var(--ink-primary); }
+
+  footer { text-align: center; font-size: 0.8rem; color: var(--ink-muted); margin-top: 48px; padding: 20px; border-top: 1px solid var(--border); }
+
+  .owned-toggle-list::-webkit-scrollbar { width: 8px; }
+  .owned-toggle-list::-webkit-scrollbar-track { background: transparent; }
+  .owned-toggle-list::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 10px;
+  }
+  .owned-toggle-list::-webkit-scrollbar-thumb:hover { background: var(--ink-muted); }
+
+  .theme-toggle-btn {
+    position: fixed;
+    bottom: 22px;
+    right: 22px;
+    width: 42px;
+    height: 42px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.05rem;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+    z-index: 1000;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Palworld配合ルート検索</h1>
+  <div class="subtitle">所持しているパルから目的のパルまでの配合の最適経路を、実例データベースベースで計算します。</div>
+</header>
+
+<div class="card">
+  <h2><span>①</span> 持っているパルを選択</h2>
+  <div class="row">
+    <input type="text" id="ownedSearch" class="owned-search" placeholder="パル名や英語名で検索..." style="flex:1;">
+  </div>
+  <div class="row" style="margin-bottom: 12px;">
+    <span class="hint">並び順:</span>
+    <button type="button" class="sort-toggle-btn on" id="ownedSortAiueo" data-sort="aiueo">あいうえお順</button>
+    <button type="button" class="sort-toggle-btn" id="ownedSortNo" data-sort="no">図鑑No順</button>
+  </div>
+  <div class="owned-toggle-list" id="ownedToggleList"></div>
+  <div class="owned-count" id="ownedCount">選択中: 0体</div>
+</div>
+
+<div class="card">
+  <h2><span>②</span> 作りたいパルを選択</h2>
+  <div class="row">
+    <input type="text" id="targetSearch" class="owned-search" placeholder="作りたいパル名で検索..." style="flex:1;">
+  </div>
+  <div class="row" style="margin-bottom: 12px;">
+    <span class="hint">並び順:</span>
+    <button type="button" class="sort-toggle-btn on" id="targetSortAiueo" data-sort="aiueo">あいうえお順</button>
+    <button type="button" class="sort-toggle-btn" id="targetSortNo" data-sort="no">図鑑No順</button>
+  </div>
+  <div class="owned-toggle-list" id="targetToggleList" style="max-height:200px;"></div>
+  <div class="owned-count" id="targetSelected" style="margin-bottom:12px;">未選択</div>
+  <input type="hidden" id="targetPalSelect" value="">
+  <div class="row" style="margin-top: 16px;">
+    <button id="btnCalc" style="width: 100%; padding: 14px; font-size: 1.05rem;">配合ルートを計算する</button>
+  </div>
+  <div class="hint">※ 経路検索は手持ちから最大10世代まで幅優先探索（BFS）で全自動探索します。</div>
+</div>
+
+<div class="card">
+  <h2>計算結果</h2>
+  <div id="calcResult"><p class="hint">①と②を選択してから「配合ルートを計算する」ボタンを押してください。</p></div>
+</div>
+
+<div class="card">
+  <h2>パルデータ編集（上級者向け）</h2>
+  <div class="hint" style="margin-bottom:12px;">
+    配合ルートの計算は、実際に確認された配合実例を優先して使用します。実例がない組み合わせのみ、Wiki準拠の内部値による推定計算にフォールバックします。実機で結果が異なった場合、下のJSONを編集して反映できます。
+  </div>
+  <textarea id="dataEditor" style="width:100%; height:160px; font-family:monospace; font-size:0.75rem; background:rgba(0,0,0,0.25); border-color:var(--border);"></textarea>
+  <div class="row" style="margin-top:14px; gap:10px;">
+    <button id="btnApplyData">変更を反映する</button>
+    <button id="btnResetData" class="secondary">デフォルトに戻す</button>
+  </div>
+</div>
+
+<button id="themeToggle" class="theme-toggle-btn" title="テーマ切り替え">🌓</button>
+
+<footer>
+  <p>ローカル動作のみ。手持ちの選択状態はブラウザ(localStorage)に自動保存されます。</p>
+</footer>
+
+<script src="data.js"></script>
+<script src="breeding.js"></script>
+<script src="app.js"></script>
+<script>
+  // テーマ切り替え処理
+  const themeToggle = document.getElementById("themeToggle");
+  const html = document.documentElement;
+  
+  // 初期テーマ読み込み
+  const savedTheme = localStorage.getItem("pbh_theme") || "dark";
+  html.setAttribute("data-theme", savedTheme);
+  
+  themeToggle.addEventListener("click", () => {
+    const currentTheme = html.getAttribute("data-theme");
+    const newTheme = currentTheme === "dark" ? "light" : "dark";
+    html.setAttribute("data-theme", newTheme);
+    localStorage.setItem("pbh_theme", newTheme);
+  });
+</script>
+</body>
+</html>
