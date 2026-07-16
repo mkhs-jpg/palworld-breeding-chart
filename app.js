@@ -14,6 +14,11 @@ let ownedSortMode = "aiueo"; // "aiueo" | "no"
 let targetSortMode = "aiueo";
 let selectedTargetId = null;
 
+// 計算結果のスワイプ履歴(①②で計算した「作りたいパル」の結果を最大件数分さかのぼれる)
+const MAX_HISTORY = 5;
+let resultHistory = []; // [{ targetPal, route, ownedIdSet }]
+let currentSlideIndex = -1;
+
 init();
 
 function init() {
@@ -192,6 +197,55 @@ function bindEvents() {
   document.getElementById("ownedSortNo").addEventListener("click", () => setOwnedSort("no"));
   document.getElementById("targetSortAiueo").addEventListener("click", () => setTargetSort("aiueo"));
   document.getElementById("targetSortNo").addEventListener("click", () => setTargetSort("no"));
+
+  bindCarouselEvents();
+}
+
+// 計算結果カルーセル: パルタグのクリックはスライドが動的に再構築されるためイベント委譲で受ける。
+// 矢印/ドット/手動スワイプ(scroll)のいずれからも現在位置(currentSlideIndex)を追従させる。
+function bindCarouselEvents() {
+  const carousel = document.getElementById("resultCarousel");
+
+  carousel.addEventListener("click", (e) => {
+    const tag = e.target.closest(".pal-tag[data-pal-id]");
+    if (tag) jumpToTarget(Number(tag.dataset.palId));
+  });
+
+  let scrollDebounce = null;
+  carousel.addEventListener("scroll", () => {
+    if (scrollDebounce) clearTimeout(scrollDebounce);
+    scrollDebounce = setTimeout(() => {
+      if (resultHistory.length <= 1) return;
+      const idx = Math.round(carousel.scrollLeft / carousel.clientWidth);
+      if (idx !== currentSlideIndex && idx >= 0 && idx < resultHistory.length) {
+        currentSlideIndex = idx;
+        updateDots();
+      }
+    }, 120);
+  });
+
+  document.getElementById("carouselPrev").addEventListener("click", () => {
+    if (currentSlideIndex > 0) {
+      currentSlideIndex--;
+      scrollToSlide(currentSlideIndex);
+      updateDots();
+    }
+  });
+  document.getElementById("carouselNext").addEventListener("click", () => {
+    if (currentSlideIndex < resultHistory.length - 1) {
+      currentSlideIndex++;
+      scrollToSlide(currentSlideIndex);
+      updateDots();
+    }
+  });
+  document.getElementById("resultDots").addEventListener("click", (e) => {
+    const dot = e.target.closest(".result-dot[data-index]");
+    if (dot) {
+      currentSlideIndex = Number(dot.dataset.index);
+      scrollToSlide(currentSlideIndex);
+      updateDots();
+    }
+  });
 }
 
 function setOwnedSort(mode) {
@@ -213,30 +267,94 @@ function setTargetSort(mode) {
 
 function calcRoute() {
   if (!selectedTargetId) {
-    document.getElementById("calcResult").innerHTML =
-      `<p class="hint">②で作りたいパルを選択してください。</p>`;
+    showCarouselMessage(`<p class="hint">②で作りたいパルを選択してください。</p>`);
     return;
   }
   const targetPal = PALS.find(p => p.id === selectedTargetId);
   const owned = PALS.filter(p => ownedIds.has(p.id));
 
   if (owned.length === 0) {
-    document.getElementById("calcResult").innerHTML =
-      `<p class="hint">①で持っているパルを1体以上選んでください。</p>`;
+    showCarouselMessage(`<p class="hint">①で持っているパルを1体以上選んでください。</p>`);
     return;
   }
 
   const route = findBreedingRoute(PALS, targetPal, owned, BREEDING_EXAMPLES, 10);
-  renderRouteResult(targetPal, route, ownedIds);
+  // ボタンでの計算実行は新しい調査の起点とみなし、履歴をリセットして1件目のスライドにする。
+  pushHistorySlide(targetPal, route, new Set(ownedIds), { reset: true });
 }
 
-// パル名クリックで、そのパルを新たな「作りたいパル」として選択し直し、即座に再計算する
+// パル名クリックで、そのパルを新たな「作りたいパル」として選択し直し、結果をスライドとして履歴に追加する。
+// 現在表示中の位置より後ろの履歴は切り捨ててから追加する(ブラウザの戻る→別リンククリックと同じ挙動)。
 function jumpToTarget(palId) {
   selectedTargetId = palId;
   document.getElementById("targetPalSelect").value = palId;
   renderTargetSelect(document.getElementById("targetSearch").value);
-  document.getElementById("calcResult").scrollIntoView({ behavior: "smooth", block: "start" });
-  calcRoute();
+
+  const targetPal = PALS.find(p => p.id === palId);
+  const owned = PALS.filter(p => ownedIds.has(p.id));
+  const route = findBreedingRoute(PALS, targetPal, owned, BREEDING_EXAMPLES, 10);
+  pushHistorySlide(targetPal, route, new Set(ownedIds), { reset: false });
+
+  document.getElementById("resultCarousel").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// 計算結果カルーセルに単発のメッセージ(未選択時の案内等)だけを表示し、履歴はクリアする。
+function showCarouselMessage(html) {
+  resultHistory = [];
+  currentSlideIndex = -1;
+  document.getElementById("resultCarousel").innerHTML = `<div class="result-slide">${html}</div>`;
+  document.getElementById("carouselPrev").style.display = "none";
+  document.getElementById("carouselNext").style.display = "none";
+  document.getElementById("resultDots").innerHTML = "";
+}
+
+// resultHistoryにスライドを積んでカルーセルを再描画する。
+// reset:true は新しい調査の起点(履歴を1件にリセット)、false は現在位置より後ろを切り捨てて追加。
+function pushHistorySlide(targetPal, route, ownedIdSet, { reset }) {
+  if (reset) {
+    resultHistory = [{ targetPal, route, ownedIdSet }];
+    currentSlideIndex = 0;
+  } else {
+    resultHistory = resultHistory.slice(0, currentSlideIndex + 1);
+    resultHistory.push({ targetPal, route, ownedIdSet });
+    if (resultHistory.length > MAX_HISTORY) resultHistory.shift();
+    currentSlideIndex = resultHistory.length - 1;
+  }
+  renderCarousel();
+}
+
+function renderCarousel() {
+  const carousel = document.getElementById("resultCarousel");
+  const prevBtn = document.getElementById("carouselPrev");
+  const nextBtn = document.getElementById("carouselNext");
+  const dots = document.getElementById("resultDots");
+
+  carousel.innerHTML = resultHistory
+    .map(h => buildSlideHtml(h.targetPal, h.route, h.ownedIdSet))
+    .join("");
+
+  const showControls = resultHistory.length > 1;
+  prevBtn.style.display = showControls ? "flex" : "none";
+  nextBtn.style.display = showControls ? "flex" : "none";
+  dots.innerHTML = showControls
+    ? resultHistory
+        .map((_, i) => `<button type="button" class="result-dot ${i === currentSlideIndex ? "on" : ""}" data-index="${i}" aria-label="結果${i + 1}へ"></button>`)
+        .join("")
+    : "";
+
+  scrollToSlide(currentSlideIndex, false);
+}
+
+function updateDots() {
+  document.querySelectorAll("#resultDots .result-dot").forEach((d, i) => {
+    d.classList.toggle("on", i === currentSlideIndex);
+  });
+}
+
+function scrollToSlide(index, smooth = true) {
+  const carousel = document.getElementById("resultCarousel");
+  if (!carousel || index < 0) return;
+  carousel.scrollTo({ left: index * carousel.clientWidth, behavior: smooth ? "smooth" : "auto" });
 }
 
 // ルート内で複数回登場するパル(前世代の子が次世代の親として再利用されるケース)に
@@ -267,20 +385,20 @@ function buildPalColorMap(steps) {
   return colorMap;
 }
 
-function renderRouteResult(targetPal, route, ownedIdSet) {
-  const container = document.getElementById("calcResult");
-
+// 1回分の計算結果を、カルーセルの1スライド分のHTML文字列として組み立てる。
+// パルタグのクリックハンドラは #resultCarousel 側のイベント委譲(bindCarouselEvents)で受けるため、ここでは付与しない。
+function buildSlideHtml(targetPal, route, ownedIdSet) {
   if (route.reason === "already-owned") {
-    container.innerHTML = `<p class="result-summary">「${targetPal.name}」はすでに持っているパルの中にあります。</p>`;
-    return;
+    return `<div class="result-slide"><p class="result-summary">「${targetPal.name}」はすでに持っているパルの中にあります。</p></div>`;
   }
 
   if (!route.found) {
-    container.innerHTML = `
-      <p class="result-summary">持っているパルの組み合わせでは、10世代以内に「${targetPal.name}」へ到達できませんでした。</p>
-      <p class="hint">中間素材となるパルを他の方法で入手すると経路が見つかりやすくなります。</p>
+    return `
+      <div class="result-slide">
+        <p class="result-summary">持っているパルの組み合わせでは、10世代以内に「${targetPal.name}」へ到達できませんでした。</p>
+        <p class="hint">中間素材となるパルを他の方法で入手すると経路が見つかりやすくなります。</p>
+      </div>
     `;
-    return;
   }
 
   const palColorMap = buildPalColorMap(route.steps);
@@ -311,20 +429,16 @@ function renderRouteResult(targetPal, route, ownedIdSet) {
     </div>
   `).join("");
 
-  container.innerHTML = `
-    <p class="result-summary">「${targetPal.name}」まで <strong>${route.generations}世代</strong> の配合で到達できます。</p>
-    <div class="route-legend">
-      <span class="legend-item"><span class="legend-swatch legend-owned"></span>持っているパル</span>
-      <span class="legend-item"><span class="legend-swatch legend-bred"></span>配合で生まれるパル</span>
-      <span class="legend-item">パル名をクリックするとそのパルへのルートを表示します</span>
+  return `
+    <div class="result-slide">
+      <p class="result-summary">「${targetPal.name}」まで <strong>${route.generations}世代</strong> の配合で到達できます。</p>
+      <div class="route-legend">
+        <span class="legend-item"><span class="legend-swatch legend-owned"></span>持っているパル</span>
+        <span class="legend-item"><span class="legend-swatch legend-bred"></span>配合で生まれるパル</span>
+        <span class="legend-item">パル名をクリックするとそのパルへのルートを表示します</span>
+      </div>
+      <div>${stepsHtml}</div>
+      <p class="hint" style="margin-top:10px;">※「実例一致」は実機または配合表サイトで確認された信頼性の高い配合ルートです。「推定」は実例がない組み合わせに対して公式Rank値計算を適用した予測結果です。</p>
     </div>
-    <div>${stepsHtml}</div>
-    <p class="hint" style="margin-top:10px;">※「実例一致」は実機または配合表サイトで確認された信頼性の高い配合ルートです。「推定」は実例がない組み合わせに対して公式Rank値計算を適用した予測結果です。</p>
   `;
-
-  container.querySelectorAll(".pal-tag[data-pal-id]").forEach(el => {
-    el.addEventListener("click", () => {
-      jumpToTarget(Number(el.dataset.palId));
-    });
-  });
 }

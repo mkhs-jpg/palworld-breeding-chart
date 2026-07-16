@@ -276,6 +276,63 @@
 
   .result-summary { font-size: 1.05rem; font-weight: 700; margin-bottom: 16px; color: var(--ink-primary); }
 
+  /* ---- 計算結果カルーセル(スワイプで履歴を行き来) ---- */
+  .result-carousel-wrap { position: relative; }
+
+  .result-carousel {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    border-radius: 8px;
+  }
+  .result-carousel::-webkit-scrollbar { display: none; }
+
+  .result-slide {
+    flex: 0 0 100%;
+    min-width: 0;
+    scroll-snap-align: start;
+  }
+
+  .carousel-nav-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    line-height: 1;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+    z-index: 5;
+    padding: 0;
+  }
+  .carousel-nav-prev { left: -14px; }
+  .carousel-nav-next { right: -14px; }
+
+  .result-dots {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 14px;
+  }
+  .result-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-strong);
+    cursor: pointer;
+    padding: 0;
+  }
+  .result-dot.on { background: var(--accent); border-color: var(--accent); }
+
   footer { text-align: center; font-size: 0.8rem; color: var(--ink-muted); margin-top: 48px; padding: 20px; border-top: 1px solid var(--border); }
 
   .owned-toggle-list::-webkit-scrollbar { width: 8px; }
@@ -316,6 +373,8 @@
     .owned-toggle { padding: 7px 12px; font-size: 0.85rem; }
     .route-step { flex-wrap: wrap; gap: 8px 14px; }
     .theme-toggle-btn { bottom: 14px; right: 14px; }
+    /* 矢印ボタンはカード外に十分な余白が無く本文と重なるため、スマホ幅では非表示(スワイプ+ドットで操作) */
+    .carousel-nav-btn { display: none !important; }
   }
 </style>
 </head>
@@ -361,7 +420,14 @@
 
 <div class="card">
   <h2>計算結果</h2>
-  <div id="calcResult"><p class="hint">①と②を選択してから「配合ルートを計算する」ボタンを押してください。</p></div>
+  <div class="result-carousel-wrap">
+    <button type="button" class="carousel-nav-btn carousel-nav-prev" id="carouselPrev" aria-label="前の結果へ" style="display:none;">‹</button>
+    <div class="result-carousel" id="resultCarousel">
+      <div class="result-slide"><p class="hint">①と②を選択してから「配合ルートを計算する」ボタンを押してください。</p></div>
+    </div>
+    <button type="button" class="carousel-nav-btn carousel-nav-next" id="carouselNext" aria-label="次の結果へ" style="display:none;">›</button>
+  </div>
+  <div class="result-dots" id="resultDots"></div>
 </div>
 
 
