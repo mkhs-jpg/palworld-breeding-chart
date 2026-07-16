@@ -565,9 +565,8 @@ function buildRouteText(targetPal, route, requiredId) {
   const requiredPal = requiredId != null ? PALS.find(p => p.id === requiredId) : null;
   const lines = [`「${targetPal.name}」まで${route.generations}世代の配合で到達`];
   route.steps.forEach((s, i) => {
-    const badge = s.isExample ? "実例一致" : s.exact ? "推定(完全)" : "推定(最近傍)";
     const usesRequired = requiredId != null && (s.parentA.id === requiredId || s.parentB.id === requiredId);
-    lines.push(`${i + 1}世代目: ${s.parentA.name} × ${s.parentB.name} → ${s.child.name}(${badge}${usesRequired ? "・経由指定" : ""})`);
+    lines.push(`${i + 1}世代目: ${s.parentA.name} × ${s.parentB.name} → ${s.child.name}${usesRequired ? "(経由指定)" : ""}`);
   });
   if (requiredPal) lines.push(`※「経由指定」は「${requiredPal.name}」を実際に配合に使ったステップです。`);
   return lines.join("\n");
@@ -680,11 +679,6 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex) {
         ${palTag(s.parentA)} ×
         ${palTag(s.parentB)} →
         ${palTag(s.child)}
-        ${s.isExample
-          ? '<span class="badge exact">実例一致</span>'
-          : s.exact
-            ? '<span class="badge approx-exact">推定(完全)</span>'
-            : '<span class="badge approx">推定(最近傍)</span>'}
         ${usesRequired ? '<span class="badge required">経由指定</span>' : ""}
       </div>
     </div>
@@ -707,7 +701,6 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex) {
         <span class="legend-item">パル名をクリックするとそのパルへのルートを表示します</span>
       </div>
       <div>${stepsHtml}</div>
-      <p class="hint" style="margin-top:10px;">※「実例一致」は実機または配合表サイトで確認された信頼性の高い配合ルートです。「推定」は実例がない組み合わせに対して公式Rank値計算を適用した予測結果です。</p>
       ${requiredNote}
     </div>
   `;
