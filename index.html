@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>
+  // data.js等の読み込み完了を待たず、描画前にテーマを確定させてちらつき(FOUC)を防ぐ。
+  document.documentElement.setAttribute("data-theme", localStorage.getItem("pbh_theme") || "dark");
+</script>
 <title>パル配合ルート検索 | Palworld Breeding Helper</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -586,14 +590,10 @@
 <script src="breeding.js"></script>
 <script src="app.js"></script>
 <script>
-  // テーマ切り替え処理
+  // テーマ切り替え処理(初期テーマは<head>内で既に適用済み、ここではトグルのみ)
   const themeToggle = document.getElementById("themeToggle");
   const html = document.documentElement;
-  
-  // 初期テーマ読み込み
-  const savedTheme = localStorage.getItem("pbh_theme") || "dark";
-  html.setAttribute("data-theme", savedTheme);
-  
+
   themeToggle.addEventListener("click", () => {
     const currentTheme = html.getAttribute("data-theme");
     const newTheme = currentTheme === "dark" ? "light" : "dark";
