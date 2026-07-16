@@ -21,7 +21,6 @@ function init() {
     loadOwned();
     renderTargetSelect();
     renderOwnedToggleList();
-    document.getElementById("dataEditor").value = JSON.stringify({ pals: PALS }, null, 2);
     bindEvents();
   });
 }
@@ -188,8 +187,6 @@ function bindEvents() {
     renderTargetSelect(e.target.value);
   });
   document.getElementById("btnCalc").addEventListener("click", calcRoute);
-  document.getElementById("btnApplyData").addEventListener("click", applyEditedData);
-  document.getElementById("btnResetData").addEventListener("click", resetData);
 
   document.getElementById("ownedSortAiueo").addEventListener("click", () => setOwnedSort("aiueo"));
   document.getElementById("ownedSortNo").addEventListener("click", () => setOwnedSort("no"));
@@ -330,30 +327,4 @@ function renderRouteResult(targetPal, route, ownedIdSet) {
       jumpToTarget(Number(el.dataset.palId));
     });
   });
-}
-
-// ---------- データ編集 ----------
-
-function applyEditedData() {
-  try {
-    const parsed = JSON.parse(document.getElementById("dataEditor").value);
-    if (!Array.isArray(parsed.pals)) throw new Error("pals配列がありません");
-    PALS = parsed.pals;
-    localStorage.setItem(LS_KEYS.pals, JSON.stringify({ version: DATA_VERSION, pals: PALS }));
-    renderTargetSelect();
-    renderOwnedToggleList();
-    alert("反映しました。");
-  } catch (e) {
-    alert("JSONの形式が正しくありません: " + e.message);
-  }
-}
-
-function resetData() {
-  localStorage.removeItem(LS_KEYS.pals);
-  PALS = EMBEDDED_PALS_DATA.pals;
-  BREEDING_EXAMPLES = (typeof EMBEDDED_BREEDING_EXAMPLES !== "undefined") ? EMBEDDED_BREEDING_EXAMPLES : {};
-  localStorage.setItem(LS_KEYS.pals, JSON.stringify({ version: DATA_VERSION, pals: PALS }));
-  document.getElementById("dataEditor").value = JSON.stringify({ pals: PALS }, null, 2);
-  renderTargetSelect();
-  renderOwnedToggleList();
 }
