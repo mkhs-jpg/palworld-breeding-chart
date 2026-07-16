@@ -155,7 +155,7 @@ function updateTargetSelected() {
   const el = document.getElementById("targetSelected");
   if (selectedTargetId) {
     const pal = PALS.find(p => p.id === selectedTargetId);
-    el.textContent = pal ? `選択中: ${pal.name}${pal.nameEn ? "（" + pal.nameEn + "）" : ""}` : "未選択";
+    el.textContent = pal ? `選択中: ${pal.name}` : "未選択";
   } else {
     el.textContent = "未選択";
   }
@@ -282,8 +282,8 @@ function renderPaldexList(filterText = "") {
 
     return `
       <div class="paldex-entry" data-id="${p.id}">
+        <img class="paldex-icon" src="images/pal-${p.paldexId.toLowerCase()}.png" alt="" loading="lazy" onerror="this.style.display='none'">
         <span class="paldex-name">${p.name}</span>
-        <span class="paldex-nameEn">${p.nameEn || ""}</span>
         <span class="paldex-meta">No.${p.paldexId} ${p.attribute}</span>
         <span class="paldex-stats">HP${p.hp} 攻${p.attack} 防${p.defense}</span>
         ${workHtml}

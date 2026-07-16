@@ -138,13 +138,20 @@
   }
   .paldex-entry:last-child { border-bottom: none; }
   .paldex-entry:hover { background: var(--surface-sunken); }
+  .paldex-icon {
+    width: 44px;
+    height: 44px;
+    object-fit: contain;
+    border-radius: 8px;
+    background: var(--surface-sunken);
+    flex-shrink: 0;
+  }
   .paldex-name {
     font-weight: 700;
     font-size: 0.98rem;
     color: var(--ink-primary);
     min-width: 130px;
   }
-  .paldex-nameEn { color: var(--ink-muted); font-weight: 500; font-size: 0.85rem; }
   .paldex-meta { color: var(--ink-secondary); font-size: 0.82rem; }
   .paldex-stats { color: var(--ink-muted); font-size: 0.8rem; }
   .paldex-work-list { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; margin-top: 4px; }
