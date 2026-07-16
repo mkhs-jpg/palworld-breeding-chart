@@ -159,6 +159,17 @@
     border: 1px solid var(--border-strong);
   }
   .paldex-work-empty { color: var(--ink-muted); font-size: 0.78rem; font-style: italic; }
+  .paldex-work-badge.sorted { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+  .paldex-owned-only-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9rem;
+    color: var(--ink-secondary);
+    cursor: pointer;
+  }
+  .paldex-owned-only-label input { width: auto; padding: 0; cursor: pointer; }
 
   .card {
     background: var(--surface);
@@ -515,6 +526,24 @@
       <span class="hint">並び順:</span>
       <button type="button" class="sort-toggle-btn on" id="paldexSortAiueo" data-sort="aiueo">あいうえお順</button>
       <button type="button" class="sort-toggle-btn" id="paldexSortNo" data-sort="no">図鑑No順</button>
+      <select id="paldexWorkSort">
+        <option value="">作業適性の高い順...</option>
+        <option value="Kindling">火おこし</option>
+        <option value="Watering">水やり</option>
+        <option value="Planting">種まき</option>
+        <option value="Generating Electricity">発電</option>
+        <option value="Handiwork">手作業</option>
+        <option value="Gathering">採集</option>
+        <option value="Lumbering">伐採</option>
+        <option value="Mining">採掘</option>
+        <option value="Medicine Production">製薬</option>
+        <option value="Cooling">冷却</option>
+        <option value="Transporting">運搬</option>
+        <option value="Farming">牧場</option>
+      </select>
+    </div>
+    <div class="row" style="margin-bottom: 12px;">
+      <label class="paldex-owned-only-label"><input type="checkbox" id="paldexOwnedOnly"> 持っているパルだけ表示</label>
     </div>
     <div id="paldexList"></div>
   </div>

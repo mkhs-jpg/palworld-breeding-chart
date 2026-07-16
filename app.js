@@ -15,6 +15,8 @@ let targetSortMode = "aiueo";
 let selectedTargetId = null;
 let requiredPalId = null; // ②で指定した「必ず経由する所持パル」(任意、未指定はnull)
 let paldexSortMode = "aiueo";
+let paldexWorkSortType = null; // 指定した作業適性タイプの高い順に並べる(未指定はnull、あいうえお順/図鑑No順を優先)
+let paldexOwnedOnly = false; // trueなら所持パルだけに絞り込む
 
 // 計算結果のスワイプ履歴(①②③で計算した「作りたいパル」の結果を最大件数分さかのぼれる)
 const MAX_HISTORY = 5;
@@ -260,12 +262,21 @@ function renderPaldexList(filterText = "") {
     });
   }
 
-  const sorted = sortPals(filtered, paldexSortMode);
+  if (paldexOwnedOnly) {
+    filtered = filtered.filter(p => ownedIds.has(p.id));
+  }
+
+  const sorted = paldexWorkSortType
+    ? sortByWorkSuitability(filtered, paldexWorkSortType)
+    : sortPals(filtered, paldexSortMode);
 
   list.innerHTML = sorted.map(p => {
     const workHtml = (p.workSuitability && p.workSuitability.length > 0)
       ? `<div class="paldex-work-list">${p.workSuitability
-          .map(w => `<span class="paldex-work-badge">${WORK_TYPE_JA[w.type] || w.type} Lv.${w.level}</span>`)
+          .map(w => {
+            const isSorted = w.type === paldexWorkSortType;
+            return `<span class="paldex-work-badge${isSorted ? " sorted" : ""}">${WORK_TYPE_JA[w.type] || w.type} Lv.${w.level}</span>`;
+          })
           .join("")}</div>`
       : `<div class="paldex-work-list"><span class="paldex-work-empty">作業適性データなし</span></div>`;
 
@@ -287,10 +298,42 @@ function renderPaldexList(filterText = "") {
   });
 }
 
+// 指定した作業適性タイプのLvが高い順に並べる。データが無い/その適性を持たないパルはLv.0扱いで末尾に回る。
+function getWorkLevel(pal, type) {
+  if (!pal.workSuitability) return 0;
+  const entry = pal.workSuitability.find(w => w.type === type);
+  return entry ? entry.level : 0;
+}
+
+function sortByWorkSuitability(pals, type) {
+  const list = [...pals];
+  return list.sort((a, b) => {
+    const diff = getWorkLevel(b, type) - getWorkLevel(a, type);
+    if (diff !== 0) return diff;
+    return a.name.localeCompare(b.name, "ja");
+  });
+}
+
 function setPaldexSort(mode) {
   paldexSortMode = mode;
+  paldexWorkSortType = null;
+  document.getElementById("paldexWorkSort").value = "";
   document.getElementById("paldexSortAiueo").classList.toggle("on", mode === "aiueo");
   document.getElementById("paldexSortNo").classList.toggle("on", mode === "no");
+  renderPaldexList(document.getElementById("paldexSearch").value);
+}
+
+function setPaldexWorkSort(type) {
+  paldexWorkSortType = type || null;
+  // 作業適性順を選んだら、あいうえお順/図鑑No順ボタンの見た目はどちらもオフにする(併用しない)。
+  // プルダウンを「指定なし」に戻したら、元のあいうえお順/図鑑No順の見た目を復元する。
+  document.getElementById("paldexSortAiueo").classList.toggle("on", !paldexWorkSortType && paldexSortMode === "aiueo");
+  document.getElementById("paldexSortNo").classList.toggle("on", !paldexWorkSortType && paldexSortMode === "no");
+  renderPaldexList(document.getElementById("paldexSearch").value);
+}
+
+function setPaldexOwnedOnly(checked) {
+  paldexOwnedOnly = checked;
   renderPaldexList(document.getElementById("paldexSearch").value);
 }
 
@@ -335,6 +378,8 @@ function bindEvents() {
   });
   document.getElementById("paldexSortAiueo").addEventListener("click", () => setPaldexSort("aiueo"));
   document.getElementById("paldexSortNo").addEventListener("click", () => setPaldexSort("no"));
+  document.getElementById("paldexWorkSort").addEventListener("change", (e) => setPaldexWorkSort(e.target.value));
+  document.getElementById("paldexOwnedOnly").addEventListener("change", (e) => setPaldexOwnedOnly(e.target.checked));
 
   bindCarouselEvents();
 }
