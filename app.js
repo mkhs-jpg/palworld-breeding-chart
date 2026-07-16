@@ -391,7 +391,9 @@ function bindCarouselEvents() {
 
   carousel.addEventListener("click", (e) => {
     const tag = e.target.closest(".pal-tag[data-pal-id]");
-    if (tag) jumpToTarget(Number(tag.dataset.palId));
+    if (tag) { jumpToTarget(Number(tag.dataset.palId)); return; }
+    const copyBtn = e.target.closest(".copy-route-btn[data-copy-index]");
+    if (copyBtn) copyRouteText(Number(copyBtn.dataset.copyIndex));
   });
 
   let scrollDebounce = null;
@@ -522,7 +524,7 @@ function renderCarousel() {
   const dots = document.getElementById("resultDots");
 
   carousel.innerHTML = resultHistory
-    .map(h => buildSlideHtml(h.targetPal, h.route, h.ownedIdSet, h.requiredId))
+    .map((h, i) => buildSlideHtml(h.targetPal, h.route, h.ownedIdSet, h.requiredId, i))
     .join("");
 
   const showControls = resultHistory.length > 1;
@@ -558,6 +560,59 @@ const ROUTE_REUSE_COLOR_VARS = [
   "var(--cat-5)", "var(--cat-6)", "var(--cat-7)", "var(--cat-8)"
 ];
 
+// 計算結果をプレーンテキストに変換する(クリップボードコピー用)。
+function buildRouteText(targetPal, route, requiredId) {
+  const requiredPal = requiredId != null ? PALS.find(p => p.id === requiredId) : null;
+  const lines = [`「${targetPal.name}」まで${route.generations}世代の配合で到達`];
+  route.steps.forEach((s, i) => {
+    const badge = s.isExample ? "実例一致" : s.exact ? "推定(完全)" : "推定(最近傍)";
+    const usesRequired = requiredId != null && (s.parentA.id === requiredId || s.parentB.id === requiredId);
+    lines.push(`${i + 1}世代目: ${s.parentA.name} × ${s.parentB.name} → ${s.child.name}(${badge}${usesRequired ? "・経由指定" : ""})`);
+  });
+  if (requiredPal) lines.push(`※「経由指定」は「${requiredPal.name}」を実際に配合に使ったステップです。`);
+  return lines.join("\n");
+}
+
+// クリップボードコピー。file://で開いた場合など navigator.clipboard が使えない/失敗する環境向けに
+// document.execCommand("copy") へのフォールバックを用意する。
+async function copyRouteText(index) {
+  const h = resultHistory[index];
+  if (!h || !h.route.found) return;
+  const text = buildRouteText(h.targetPal, h.route, h.requiredId);
+  const btn = document.querySelector(`.copy-route-btn[data-copy-index="${index}"]`);
+  const showResult = (label) => {
+    if (!btn) return;
+    const original = btn.dataset.originalLabel || btn.textContent;
+    btn.dataset.originalLabel = original;
+    btn.textContent = label;
+    setTimeout(() => { btn.textContent = btn.dataset.originalLabel; }, 1500);
+  };
+
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error("clipboard API unavailable");
+    await navigator.clipboard.writeText(text);
+    showResult("コピーしました");
+    return;
+  } catch (e) {
+    // フォールバックへ
+  }
+
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand("copy");
+    showResult("コピーしました");
+  } catch (e) {
+    showResult("コピーに失敗しました");
+  } finally {
+    document.body.removeChild(ta);
+  }
+}
+
 function buildPalColorMap(steps) {
   const countById = new Map();
   for (const s of steps) {
@@ -580,7 +635,7 @@ function buildPalColorMap(steps) {
 // 1回分の計算結果を、カルーセルの1スライド分のHTML文字列として組み立てる。
 // パルタグのクリックハンドラは #resultCarousel 側のイベント委譲(bindCarouselEvents)で受けるため、ここでは付与しない。
 // requiredId: そのスライド計算時点で指定されていた「必ず経由する所持パル」のid(未指定ならnull)。
-function buildSlideHtml(targetPal, route, ownedIdSet, requiredId) {
+function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex) {
   const requiredPal = requiredId != null ? PALS.find(p => p.id === requiredId) : null;
 
   if (route.reason === "already-owned") {
@@ -642,7 +697,10 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId) {
 
   return `
     <div class="result-slide">
-      <p class="result-summary">「${targetPal.name}」まで <strong>${route.generations}世代</strong> の配合で到達できます。</p>
+      <div class="route-actions">
+        <p class="result-summary">「${targetPal.name}」まで <strong>${route.generations}世代</strong> の配合で到達できます。</p>
+        <button type="button" class="secondary copy-route-btn" data-copy-index="${slideIndex}">結果をコピー</button>
+      </div>
       <div class="route-legend">
         <span class="legend-item"><span class="legend-swatch legend-owned"></span>持っているパル</span>
         <span class="legend-item"><span class="legend-swatch legend-bred"></span>配合で生まれるパル</span>
