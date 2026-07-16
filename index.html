@@ -307,9 +307,20 @@
   .pal-tag {
     font-weight: 700;
     cursor: pointer;
-    padding: 4px 11px;
+    padding: 4px 11px 4px 4px;
     border-radius: 6px;
     color: var(--ink-primary);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .pal-tag-icon {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+    border-radius: 5px;
+    background: var(--surface-sunken);
+    flex-shrink: 0;
   }
   .pal-tag-owned {
     color: var(--status-good-ink, #ffffff);

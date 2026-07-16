@@ -612,7 +612,8 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId) {
     // 持っているパル(常に緑背景で固定)には適用しない。
     const color = !isOwned ? palColorMap.get(pal.id) : null;
     const colorStyle = color ? ` style="border-color:${color}; color:${color};"` : "";
-    return `<span class="pal-tag ${ownedClass}"${colorStyle} data-pal-id="${pal.id}" title="クリックでこのパルへの配合ルートを見る">${pal.name}</span>`;
+    const icon = `<img class="pal-tag-icon" src="images/pal-${pal.paldexId.toLowerCase()}.png" alt="" loading="lazy" onerror="this.style.display='none'">`;
+    return `<span class="pal-tag ${ownedClass}"${colorStyle} data-pal-id="${pal.id}" title="クリックでこのパルへの配合ルートを見る">${icon}${pal.name}</span>`;
   };
 
   const stepsHtml = route.steps.map((s, i) => {
