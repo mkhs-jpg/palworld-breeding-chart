@@ -273,6 +273,7 @@
   .badge.exact { background: var(--status-good); color: #ffffff; }
   .badge.approx-exact { background: var(--status-warning); color: #ffffff; }
   .badge.approx { background: var(--surface-sunken); color: var(--ink-secondary); border: 1px solid var(--border-strong); }
+  .badge.required { background: var(--accent); color: var(--accent-ink); }
 
   .result-summary { font-size: 1.05rem; font-weight: 700; margin-bottom: 16px; color: var(--ink-primary); }
 
@@ -400,7 +401,14 @@
 </div>
 
 <div class="card">
-  <h2><span>②</span> 作りたいパルを選択</h2>
+  <h2><span>②</span> (任意) 必ず経由する所持パルを選ぶ</h2>
+  <div class="hint" style="margin-bottom:12px;">指定すると、そのパルを経路のどこかで実際に配合に使うルートだけを探します。①のパル選択を変えると候補も更新されます。</div>
+  <div class="owned-toggle-list" id="requiredToggleList" style="max-height:150px;"></div>
+  <div class="owned-count" id="requiredSelected">未指定</div>
+</div>
+
+<div class="card">
+  <h2><span>③</span> 作りたいパルを選択</h2>
   <div class="row">
     <input type="text" id="targetSearch" class="owned-search" placeholder="作りたいパル名で検索..." style="flex:1;">
   </div>
@@ -423,7 +431,7 @@
   <div class="result-carousel-wrap">
     <button type="button" class="carousel-nav-btn carousel-nav-prev" id="carouselPrev" aria-label="前の結果へ" style="display:none;">‹</button>
     <div class="result-carousel" id="resultCarousel">
-      <div class="result-slide"><p class="hint">①と②を選択してから「配合ルートを計算する」ボタンを押してください。</p></div>
+      <div class="result-slide"><p class="hint">①と③を選択してから「配合ルートを計算する」ボタンを押してください。</p></div>
     </div>
     <button type="button" class="carousel-nav-btn carousel-nav-next" id="carouselNext" aria-label="次の結果へ" style="display:none;">›</button>
   </div>

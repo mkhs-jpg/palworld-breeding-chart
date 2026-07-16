@@ -13,10 +13,11 @@ let ownedIds = new Set();
 let ownedSortMode = "aiueo"; // "aiueo" | "no"
 let targetSortMode = "aiueo";
 let selectedTargetId = null;
+let requiredPalId = null; // ②で指定した「必ず経由する所持パル」(任意、未指定はnull)
 
-// 計算結果のスワイプ履歴(①②で計算した「作りたいパル」の結果を最大件数分さかのぼれる)
+// 計算結果のスワイプ履歴(①②③で計算した「作りたいパル」の結果を最大件数分さかのぼれる)
 const MAX_HISTORY = 5;
-let resultHistory = []; // [{ targetPal, route, ownedIdSet }]
+let resultHistory = []; // [{ targetPal, route, ownedIdSet, requiredPalId }]
 let currentSlideIndex = -1;
 
 init();
@@ -26,6 +27,7 @@ function init() {
     loadOwned();
     renderTargetSelect();
     renderOwnedToggleList();
+    renderRequiredToggleList();
     bindEvents();
   });
 }
@@ -174,10 +176,50 @@ function renderOwnedToggleList(filterText = "") {
       saveOwned();
       el.classList.toggle("on");
       updateOwnedCount();
+      // ①の所持パルが変わったら②(経由必須パル)の候補も更新し、
+      // 経由必須に指定していたパルが手放されたら指定を自動解除する。
+      if (requiredPalId != null && !ownedIds.has(requiredPalId)) {
+        requiredPalId = null;
+      }
+      renderRequiredToggleList();
     });
   });
 
   updateOwnedCount();
+}
+
+// ②(任意)必ず経由する所持パルの候補リスト。①で現在選ばれている所持パルだけを候補にする単一選択リスト。
+function renderRequiredToggleList() {
+  const list = document.getElementById("requiredToggleList");
+  const owned = PALS.filter(p => ownedIds.has(p.id));
+  const sorted = sortPals(owned, ownedSortMode);
+
+  list.innerHTML = sorted.map(p => `
+    <div class="owned-toggle ${requiredPalId === p.id ? "on" : ""}" data-id="${p.id}">${p.name}</div>
+  `).join("");
+
+  list.querySelectorAll(".owned-toggle").forEach(el => {
+    el.addEventListener("click", () => {
+      const id = Number(el.dataset.id);
+      requiredPalId = requiredPalId === id ? null : id;
+      list.querySelectorAll(".owned-toggle").forEach(t => {
+        t.classList.toggle("on", Number(t.dataset.id) === requiredPalId);
+      });
+      updateRequiredSelected();
+    });
+  });
+
+  updateRequiredSelected();
+}
+
+function updateRequiredSelected() {
+  const el = document.getElementById("requiredSelected");
+  if (requiredPalId != null) {
+    const pal = PALS.find(p => p.id === requiredPalId);
+    el.textContent = pal ? `指定中: ${pal.name}` : "未指定";
+  } else {
+    el.textContent = "未指定";
+  }
 }
 
 function updateOwnedCount() {
@@ -265,9 +307,17 @@ function setTargetSort(mode) {
 
 // ---------- 配合ルート計算 ----------
 
+// requiredPalIdが指定されていればfindBreedingRouteVia、無ければ通常のfindBreedingRouteを使う。
+function computeRoute(targetPal, owned) {
+  if (requiredPalId != null) {
+    return findBreedingRouteVia(PALS, targetPal, owned, requiredPalId, BREEDING_EXAMPLES, 10);
+  }
+  return findBreedingRoute(PALS, targetPal, owned, BREEDING_EXAMPLES, 10);
+}
+
 function calcRoute() {
   if (!selectedTargetId) {
-    showCarouselMessage(`<p class="hint">②で作りたいパルを選択してください。</p>`);
+    showCarouselMessage(`<p class="hint">③で作りたいパルを選択してください。</p>`);
     return;
   }
   const targetPal = PALS.find(p => p.id === selectedTargetId);
@@ -278,13 +328,14 @@ function calcRoute() {
     return;
   }
 
-  const route = findBreedingRoute(PALS, targetPal, owned, BREEDING_EXAMPLES, 10);
+  const route = computeRoute(targetPal, owned);
   // ボタンでの計算実行は新しい調査の起点とみなし、履歴をリセットして1件目のスライドにする。
-  pushHistorySlide(targetPal, route, new Set(ownedIds), { reset: true });
+  pushHistorySlide(targetPal, route, new Set(ownedIds), requiredPalId, { reset: true });
 }
 
 // パル名クリックで、そのパルを新たな「作りたいパル」として選択し直し、結果をスライドとして履歴に追加する。
 // 現在表示中の位置より後ろの履歴は切り捨ててから追加する(ブラウザの戻る→別リンククリックと同じ挙動)。
+// 経由必須パルの指定はドリルダウン中も引き継ぐ。
 function jumpToTarget(palId) {
   selectedTargetId = palId;
   document.getElementById("targetPalSelect").value = palId;
@@ -292,8 +343,8 @@ function jumpToTarget(palId) {
 
   const targetPal = PALS.find(p => p.id === palId);
   const owned = PALS.filter(p => ownedIds.has(p.id));
-  const route = findBreedingRoute(PALS, targetPal, owned, BREEDING_EXAMPLES, 10);
-  pushHistorySlide(targetPal, route, new Set(ownedIds), { reset: false });
+  const route = computeRoute(targetPal, owned);
+  pushHistorySlide(targetPal, route, new Set(ownedIds), requiredPalId, { reset: false });
 
   document.getElementById("resultCarousel").scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -310,13 +361,13 @@ function showCarouselMessage(html) {
 
 // resultHistoryにスライドを積んでカルーセルを再描画する。
 // reset:true は新しい調査の起点(履歴を1件にリセット)、false は現在位置より後ろを切り捨てて追加。
-function pushHistorySlide(targetPal, route, ownedIdSet, { reset }) {
+function pushHistorySlide(targetPal, route, ownedIdSet, requiredId, { reset }) {
   if (reset) {
-    resultHistory = [{ targetPal, route, ownedIdSet }];
+    resultHistory = [{ targetPal, route, ownedIdSet, requiredId }];
     currentSlideIndex = 0;
   } else {
     resultHistory = resultHistory.slice(0, currentSlideIndex + 1);
-    resultHistory.push({ targetPal, route, ownedIdSet });
+    resultHistory.push({ targetPal, route, ownedIdSet, requiredId });
     if (resultHistory.length > MAX_HISTORY) resultHistory.shift();
     currentSlideIndex = resultHistory.length - 1;
   }
@@ -330,7 +381,7 @@ function renderCarousel() {
   const dots = document.getElementById("resultDots");
 
   carousel.innerHTML = resultHistory
-    .map(h => buildSlideHtml(h.targetPal, h.route, h.ownedIdSet))
+    .map(h => buildSlideHtml(h.targetPal, h.route, h.ownedIdSet, h.requiredId))
     .join("");
 
   const showControls = resultHistory.length > 1;
@@ -387,15 +438,25 @@ function buildPalColorMap(steps) {
 
 // 1回分の計算結果を、カルーセルの1スライド分のHTML文字列として組み立てる。
 // パルタグのクリックハンドラは #resultCarousel 側のイベント委譲(bindCarouselEvents)で受けるため、ここでは付与しない。
-function buildSlideHtml(targetPal, route, ownedIdSet) {
+// requiredId: そのスライド計算時点で指定されていた「必ず経由する所持パル」のid(未指定ならnull)。
+function buildSlideHtml(targetPal, route, ownedIdSet, requiredId) {
+  const requiredPal = requiredId != null ? PALS.find(p => p.id === requiredId) : null;
+
   if (route.reason === "already-owned") {
     return `<div class="result-slide"><p class="result-summary">「${targetPal.name}」はすでに持っているパルの中にあります。</p></div>`;
   }
 
+  if (route.reason === "required-pal-not-owned") {
+    return `<div class="result-slide"><p class="result-summary">経由指定したパルが所持パルから外れています。②で選び直してください。</p></div>`;
+  }
+
   if (!route.found) {
+    const summary = requiredPal
+      ? `「${requiredPal.name}」を使った配合ルートは、10世代以内に「${targetPal.name}」へ到達できませんでした。`
+      : `持っているパルの組み合わせでは、10世代以内に「${targetPal.name}」へ到達できませんでした。`;
     return `
       <div class="result-slide">
-        <p class="result-summary">持っているパルの組み合わせでは、10世代以内に「${targetPal.name}」へ到達できませんでした。</p>
+        <p class="result-summary">${summary}</p>
         <p class="hint">中間素材となるパルを他の方法で入手すると経路が見つかりやすくなります。</p>
       </div>
     `;
@@ -413,7 +474,9 @@ function buildSlideHtml(targetPal, route, ownedIdSet) {
     return `<span class="pal-tag ${ownedClass}"${colorStyle} data-pal-id="${pal.id}" title="クリックでこのパルへの配合ルートを見る">${pal.name}</span>`;
   };
 
-  const stepsHtml = route.steps.map((s, i) => `
+  const stepsHtml = route.steps.map((s, i) => {
+    const usesRequired = requiredId != null && (s.parentA.id === requiredId || s.parentB.id === requiredId);
+    return `
     <div class="route-step">
       <div class="route-gen-badge">${i + 1}</div>
       <div class="route-formula">
@@ -425,9 +488,15 @@ function buildSlideHtml(targetPal, route, ownedIdSet) {
           : s.exact
             ? '<span class="badge approx-exact">推定(完全)</span>'
             : '<span class="badge approx">推定(最近傍)</span>'}
+        ${usesRequired ? '<span class="badge required">経由指定</span>' : ""}
       </div>
     </div>
-  `).join("");
+  `;
+  }).join("");
+
+  const requiredNote = requiredPal
+    ? `<p class="hint" style="margin-top:6px;">※「経由指定」バッジは「${requiredPal.name}」を実際に配合に使ったステップです。</p>`
+    : "";
 
   return `
     <div class="result-slide">
@@ -439,6 +508,7 @@ function buildSlideHtml(targetPal, route, ownedIdSet) {
       </div>
       <div>${stepsHtml}</div>
       <p class="hint" style="margin-top:10px;">※「実例一致」は実機または配合表サイトで確認された信頼性の高い配合ルートです。「推定」は実例がない組み合わせに対して公式Rank値計算を適用した予測結果です。</p>
+      ${requiredNote}
     </div>
   `;
 }
