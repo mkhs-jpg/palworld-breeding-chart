@@ -3,7 +3,8 @@
 
 const LS_KEYS = {
   pals: "pbh_pals_data",
-  owned: "pbh_owned_ids"
+  owned: "pbh_owned_ids",
+  pinned: "pbh_pinned_ids"
 };
 const DATA_VERSION = 10; // pals-data.jsonのversionと一致させる。同梱データを更新したら上げる
 
@@ -18,10 +19,19 @@ let paldexSortMode = "aiueo";
 let paldexWorkSortType = null; // 指定した作業適性タイプの高い順に並べる(未指定はnull、あいうえお順/図鑑No順を優先)
 let paldexOwnedOnly = false; // trueなら所持パルだけに絞り込む
 
+// ピン留めした「作りたいパル」のid一覧(順序=ピン留めした順)。localStorageに永続化する。
+// ピン留め中のパルは①(所持パル)や②(経由必須パル)を変更するたびに現在の設定でライブ再計算され、
+// 結果カルーセル(横スワイプ)の先頭に常に表示され続ける(計算履歴のように追い出されない)。
+let pinnedIds = [];
+
 // 計算結果のスワイプ履歴(①②③で計算した「作りたいパル」の結果を最大件数分さかのぼれる)
 const MAX_HISTORY = 5;
 let resultHistory = []; // [{ targetPal, route, ownedIdSet, requiredPalId }]
-let currentSlideIndex = -1;
+let historyCursor = -1; // resultHistory内の現在位置(戻ってから分岐した場合の切り捨てに使う)
+let activeTargetId = null; // 現在カルーセルで表示中のパルid(ピン留め有無に関わらずこのidの位置を追従表示する)
+let currentSlideIndex = -1; // 直近renderCarousel()時点でのlastSlides配列上の表示位置
+let lastSlides = []; // 直近renderCarousel()で実際に描画したスライドの配列(ナビ操作やコピー/ピン操作から参照する)
+let transientMessage = null; // 計算ボタン誤操作時などの単発案内メッセージ(セットされている間は先頭スライドとして表示)
 
 // 作業適性タイプの英語キー→日本語表示名。wikiのwork_suitabilityフィールドの表記に合わせる。
 const WORK_TYPE_JA = {
@@ -44,10 +54,12 @@ init();
 function init() {
   loadPalsData().then(() => {
     loadOwned();
+    loadPinned();
     renderTargetSelect();
     renderOwnedToggleList();
     renderRequiredToggleList();
     renderPaldexList();
+    renderCarousel();
     bindEvents();
   });
 }
@@ -81,6 +93,31 @@ function loadOwned() {
 
 function saveOwned() {
   localStorage.setItem(LS_KEYS.owned, JSON.stringify([...ownedIds]));
+}
+
+function loadPinned() {
+  const saved = localStorage.getItem(LS_KEYS.pinned);
+  if (saved) {
+    try {
+      pinnedIds = JSON.parse(saved);
+    } catch (e) {
+      pinnedIds = [];
+    }
+  }
+}
+
+function savePinned() {
+  localStorage.setItem(LS_KEYS.pinned, JSON.stringify(pinnedIds));
+}
+
+// ピン留め状態を切り替え、③選択リストと結果カルーセルの両方を最新化する。
+function togglePinned(id) {
+  const idx = pinnedIds.indexOf(id);
+  if (idx === -1) pinnedIds.push(id); else pinnedIds.splice(idx, 1);
+  savePinned();
+  transientMessage = null;
+  renderTargetSelect(document.getElementById("targetSearch").value);
+  renderCarousel();
 }
 
 // paldexIdは "005B" "テラ01" "ボス01" のような文字列形式のため、
@@ -127,11 +164,12 @@ function renderTargetSelect(filterText = "") {
   const sorted = sortPals(filtered, targetSortMode);
 
   list.innerHTML = sorted.map(p => `
-    <div class="owned-toggle ${selectedTargetId === p.id ? 'on' : ''}" data-id="${p.id}">${p.name}</div>
+    <div class="owned-toggle ${selectedTargetId === p.id ? 'on' : ''}" data-id="${p.id}">${p.name}<button type="button" class="target-pin-btn ${pinnedIds.includes(p.id) ? 'pinned' : ''}" data-pin-id="${p.id}" title="ピン留め/解除" aria-label="ピン留め">📌</button></div>
   `).join("");
 
   list.querySelectorAll(".owned-toggle").forEach(el => {
-    el.addEventListener("click", () => {
+    el.addEventListener("click", (e) => {
+      if (e.target.closest(".target-pin-btn")) return; // ピンボタンのクリックは選択トグルと独立させる
       const id = Number(el.dataset.id);
       // 単一選択: 同じものをクリックしたら解除、違うものなら切り替え
       if (selectedTargetId === id) {
@@ -145,6 +183,12 @@ function renderTargetSelect(filterText = "") {
         t.classList.toggle("on", Number(t.dataset.id) === selectedTargetId);
       });
       updateTargetSelected();
+    });
+
+    const pinBtn = el.querySelector(".target-pin-btn");
+    pinBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      togglePinned(Number(pinBtn.dataset.pinId));
     });
   });
 
@@ -202,6 +246,8 @@ function renderOwnedToggleList(filterText = "") {
         requiredPalId = null;
       }
       renderRequiredToggleList();
+      // ピン留めしたパルのルートは①の変更に追従してライブ再計算するため再描画する。
+      renderCarousel();
     });
   });
 
@@ -226,6 +272,8 @@ function renderRequiredToggleList() {
         t.classList.toggle("on", Number(t.dataset.id) === requiredPalId);
       });
       updateRequiredSelected();
+      // ピン留めしたパルのルートは②の変更に追従してライブ再計算するため再描画する。
+      renderCarousel();
     });
   });
 
@@ -384,7 +432,7 @@ function bindEvents() {
   bindCarouselEvents();
 }
 
-// 計算結果カルーセル: パルタグのクリックはスライドが動的に再構築されるためイベント委譲で受ける。
+// 計算結果カルーセル: パルタグ/コピー/ピンボタンのクリックはスライドが動的に再構築されるためイベント委譲で受ける。
 // 矢印/ドット/手動スワイプ(scroll)のいずれからも現在位置(currentSlideIndex)を追従させる。
 function bindCarouselEvents() {
   const carousel = document.getElementById("resultCarousel");
@@ -393,17 +441,20 @@ function bindCarouselEvents() {
     const tag = e.target.closest(".pal-tag[data-pal-id]");
     if (tag) { jumpToTarget(Number(tag.dataset.palId)); return; }
     const copyBtn = e.target.closest(".copy-route-btn[data-copy-index]");
-    if (copyBtn) copyRouteText(Number(copyBtn.dataset.copyIndex));
+    if (copyBtn) { copyRouteText(Number(copyBtn.dataset.copyIndex)); return; }
+    const pinBtn = e.target.closest(".pin-toggle-btn[data-pin-id]");
+    if (pinBtn) { togglePinned(Number(pinBtn.dataset.pinId)); return; }
   });
 
   let scrollDebounce = null;
   carousel.addEventListener("scroll", () => {
     if (scrollDebounce) clearTimeout(scrollDebounce);
     scrollDebounce = setTimeout(() => {
-      if (resultHistory.length <= 1) return;
+      if (lastSlides.length <= 1) return;
       const idx = Math.round(carousel.scrollLeft / carousel.clientWidth);
-      if (idx !== currentSlideIndex && idx >= 0 && idx < resultHistory.length) {
+      if (idx !== currentSlideIndex && idx >= 0 && idx < lastSlides.length) {
         currentSlideIndex = idx;
+        if (lastSlides[idx].targetPal) activeTargetId = lastSlides[idx].targetPal.id;
         updateDots();
       }
     }, 120);
@@ -412,13 +463,15 @@ function bindCarouselEvents() {
   document.getElementById("carouselPrev").addEventListener("click", () => {
     if (currentSlideIndex > 0) {
       currentSlideIndex--;
+      if (lastSlides[currentSlideIndex].targetPal) activeTargetId = lastSlides[currentSlideIndex].targetPal.id;
       scrollToSlide(currentSlideIndex);
       updateDots();
     }
   });
   document.getElementById("carouselNext").addEventListener("click", () => {
-    if (currentSlideIndex < resultHistory.length - 1) {
+    if (currentSlideIndex < lastSlides.length - 1) {
       currentSlideIndex++;
+      if (lastSlides[currentSlideIndex].targetPal) activeTargetId = lastSlides[currentSlideIndex].targetPal.id;
       scrollToSlide(currentSlideIndex);
       updateDots();
     }
@@ -427,6 +480,9 @@ function bindCarouselEvents() {
     const dot = e.target.closest(".result-dot[data-index]");
     if (dot) {
       currentSlideIndex = Number(dot.dataset.index);
+      if (lastSlides[currentSlideIndex] && lastSlides[currentSlideIndex].targetPal) {
+        activeTargetId = lastSlides[currentSlideIndex].targetPal.id;
+      }
       scrollToSlide(currentSlideIndex);
       updateDots();
     }
@@ -492,29 +548,52 @@ function jumpToTarget(palId) {
   document.getElementById("resultCarousel").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-// 計算結果カルーセルに単発のメッセージ(未選択時の案内等)だけを表示し、履歴はクリアする。
+// 計算結果カルーセルに単発のメッセージ(未選択時の案内等)だけを、ピン留めスライドの手前に表示する。
+// (履歴自体はクリアしないが、この案内は次の実際の計算/ドリルダウンで自動的に消える)
 function showCarouselMessage(html) {
-  resultHistory = [];
-  currentSlideIndex = -1;
-  document.getElementById("resultCarousel").innerHTML = `<div class="result-slide">${html}</div>`;
-  document.getElementById("carouselPrev").style.display = "none";
-  document.getElementById("carouselNext").style.display = "none";
-  document.getElementById("resultDots").innerHTML = "";
+  transientMessage = html;
+  renderCarousel();
 }
 
 // resultHistoryにスライドを積んでカルーセルを再描画する。
 // reset:true は新しい調査の起点(履歴を1件にリセット)、false は現在位置より後ろを切り捨てて追加。
 function pushHistorySlide(targetPal, route, ownedIdSet, requiredId, { reset }) {
+  transientMessage = null;
   if (reset) {
     resultHistory = [{ targetPal, route, ownedIdSet, requiredId }];
-    currentSlideIndex = 0;
+    historyCursor = 0;
   } else {
-    resultHistory = resultHistory.slice(0, currentSlideIndex + 1);
+    resultHistory = resultHistory.slice(0, historyCursor + 1);
     resultHistory.push({ targetPal, route, ownedIdSet, requiredId });
     if (resultHistory.length > MAX_HISTORY) resultHistory.shift();
-    currentSlideIndex = resultHistory.length - 1;
+    historyCursor = resultHistory.length - 1;
   }
+  activeTargetId = targetPal.id;
   renderCarousel();
+}
+
+// ピン留め中のパルは①(所持パル)/②(経由必須パル)の現在の設定でルートをその場で再計算する。
+// 同じパルが計算履歴(resultHistory)側にもある場合は重複表示を避けるため履歴側から除外する。
+function getCombinedSlides() {
+  const pinnedSet = new Set(pinnedIds);
+  const owned = PALS.filter(p => ownedIds.has(p.id));
+
+  const pinnedSlides = pinnedIds
+    .map(id => PALS.find(p => p.id === id))
+    .filter(Boolean)
+    .map(targetPal => ({
+      targetPal,
+      route: computeRoute(targetPal, owned),
+      ownedIdSet: new Set(ownedIds),
+      requiredId: requiredPalId,
+      pinned: true
+    }));
+
+  const historySlides = resultHistory
+    .filter(h => !pinnedSet.has(h.targetPal.id))
+    .map(h => ({ targetPal: h.targetPal, route: h.route, ownedIdSet: h.ownedIdSet, requiredId: h.requiredId, pinned: false }));
+
+  return [...pinnedSlides, ...historySlides];
 }
 
 function renderCarousel() {
@@ -523,15 +602,45 @@ function renderCarousel() {
   const nextBtn = document.getElementById("carouselNext");
   const dots = document.getElementById("resultDots");
 
-  carousel.innerHTML = resultHistory
-    .map((h, i) => buildSlideHtml(h.targetPal, h.route, h.ownedIdSet, h.requiredId, i))
-    .join("");
+  const routeSlides = getCombinedSlides();
 
-  const showControls = resultHistory.length > 1;
+  if (!transientMessage && routeSlides.length === 0) {
+    carousel.innerHTML = `<div class="result-slide"><p class="hint">①と③を選択してから「配合ルートを計算する」ボタンを押すか、③のパル名横の📌でピン留めしてください。</p></div>`;
+    prevBtn.style.display = "none";
+    nextBtn.style.display = "none";
+    dots.innerHTML = "";
+    lastSlides = [];
+    return;
+  }
+
+  lastSlides = [];
+  const htmlParts = [];
+  if (transientMessage) {
+    htmlParts.push(`<div class="result-slide">${transientMessage}</div>`);
+    lastSlides.push({ message: true });
+  }
+  routeSlides.forEach(s => {
+    htmlParts.push(buildSlideHtml(s.targetPal, s.route, s.ownedIdSet, s.requiredId, lastSlides.length, s.pinned));
+    lastSlides.push(s);
+  });
+  carousel.innerHTML = htmlParts.join("");
+
+  if (transientMessage) {
+    currentSlideIndex = 0;
+  } else {
+    let idx = activeTargetId != null
+      ? lastSlides.findIndex(s => s.targetPal && s.targetPal.id === activeTargetId)
+      : 0;
+    if (idx === -1) idx = lastSlides.length - 1;
+    currentSlideIndex = idx;
+    activeTargetId = lastSlides[idx].targetPal.id;
+  }
+
+  const showControls = lastSlides.length > 1;
   prevBtn.style.display = showControls ? "flex" : "none";
   nextBtn.style.display = showControls ? "flex" : "none";
   dots.innerHTML = showControls
-    ? resultHistory
+    ? lastSlides
         .map((_, i) => `<button type="button" class="result-dot ${i === currentSlideIndex ? "on" : ""}" data-index="${i}" aria-label="結果${i + 1}へ"></button>`)
         .join("")
     : "";
@@ -575,8 +684,8 @@ function buildRouteText(targetPal, route, requiredId) {
 // クリップボードコピー。file://で開いた場合など navigator.clipboard が使えない/失敗する環境向けに
 // document.execCommand("copy") へのフォールバックを用意する。
 async function copyRouteText(index) {
-  const h = resultHistory[index];
-  if (!h || !h.route.found) return;
+  const h = lastSlides[index];
+  if (!h || h.message || !h.route.found) return;
   const text = buildRouteText(h.targetPal, h.route, h.requiredId);
   const btn = document.querySelector(`.copy-route-btn[data-copy-index="${index}"]`);
   const showResult = (label) => {
@@ -634,15 +743,30 @@ function buildPalColorMap(steps) {
 // 1回分の計算結果を、カルーセルの1スライド分のHTML文字列として組み立てる。
 // パルタグのクリックハンドラは #resultCarousel 側のイベント委譲(bindCarouselEvents)で受けるため、ここでは付与しない。
 // requiredId: そのスライド計算時点で指定されていた「必ず経由する所持パル」のid(未指定ならnull)。
-function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex) {
+function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pinned) {
   const requiredPal = requiredId != null ? PALS.find(p => p.id === requiredId) : null;
+  const pinBtnHtml = `<button type="button" class="secondary pin-toggle-btn ${pinned ? "pinned" : ""}" data-pin-id="${targetPal.id}">${pinned ? "📌 ピン留め中" : "📌 ピン留めする"}</button>`;
 
   if (route.reason === "already-owned") {
-    return `<div class="result-slide"><p class="result-summary">「${targetPal.name}」はすでに持っているパルの中にあります。</p></div>`;
+    return `
+      <div class="result-slide">
+        <div class="route-actions">
+          <p class="result-summary" style="margin-bottom:0;">「${targetPal.name}」はすでに持っているパルの中にあります。</p>
+          ${pinBtnHtml}
+        </div>
+      </div>
+    `;
   }
 
   if (route.reason === "required-pal-not-owned") {
-    return `<div class="result-slide"><p class="result-summary">経由指定したパルが所持パルから外れています。②で選び直してください。</p></div>`;
+    return `
+      <div class="result-slide">
+        <div class="route-actions">
+          <p class="result-summary" style="margin-bottom:0;">経由指定したパルが所持パルから外れています。②で選び直してください。</p>
+          ${pinBtnHtml}
+        </div>
+      </div>
+    `;
   }
 
   if (!route.found) {
@@ -651,7 +775,10 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex) {
       : `持っているパルの組み合わせでは、10世代以内に「${targetPal.name}」へ到達できませんでした。`;
     return `
       <div class="result-slide">
-        <p class="result-summary">${summary}</p>
+        <div class="route-actions">
+          <p class="result-summary" style="margin-bottom:0;">${summary}</p>
+          ${pinBtnHtml}
+        </div>
         <p class="hint">中間素材となるパルを他の方法で入手すると経路が見つかりやすくなります。</p>
       </div>
     `;
@@ -693,7 +820,10 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex) {
     <div class="result-slide">
       <div class="route-actions">
         <p class="result-summary">「${targetPal.name}」まで <strong>${route.generations}世代</strong> の配合で到達できます。</p>
-        <button type="button" class="secondary copy-route-btn" data-copy-index="${slideIndex}">結果をコピー</button>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          ${pinBtnHtml}
+          <button type="button" class="secondary copy-route-btn" data-copy-index="${slideIndex}">結果をコピー</button>
+        </div>
       </div>
       <div class="route-legend">
         <span class="legend-item"><span class="legend-swatch legend-owned"></span>持っているパル</span>

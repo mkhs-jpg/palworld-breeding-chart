@@ -275,6 +275,29 @@
   }
   .owned-toggle.on:hover { filter: brightness(0.92); }
 
+  /* ---- ③作りたいパルのピン留めボタン(タグ内の小さな📌アイコン) ---- */
+  .target-pin-btn {
+    margin-left: 8px;
+    padding: 1px 6px;
+    font-size: 0.78rem;
+    line-height: 1.6;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--ink-muted);
+    border: 1px solid var(--border-strong);
+    cursor: pointer;
+  }
+  .target-pin-btn:hover { background: var(--surface-sunken); color: var(--ink-primary); }
+  .target-pin-btn.pinned {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-color: var(--accent);
+  }
+  .owned-toggle.on .target-pin-btn:not(.pinned) {
+    border-color: rgba(255, 255, 255, 0.6);
+    color: var(--accent-ink);
+  }
+
   .owned-count {
     font-size: 0.9rem;
     font-weight: 700;
@@ -345,6 +368,12 @@
     flex-wrap: wrap;
   }
   .copy-route-btn { font-size: 0.85rem; padding: 7px 14px; white-space: nowrap; }
+  .pin-toggle-btn { font-size: 0.85rem; padding: 7px 14px; white-space: nowrap; }
+  .pin-toggle-btn.pinned {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-color: var(--accent);
+  }
 
   .route-legend {
     display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
@@ -529,7 +558,7 @@
   <div class="row" style="margin-top: 16px;">
     <button id="btnCalc" style="width: 100%; padding: 14px; font-size: 1.05rem;">配合ルートを計算する</button>
   </div>
-  <div class="hint">※ 経路検索は手持ちから最大10世代まで幅優先探索（BFS）で全自動探索します。</div>
+  <div class="hint">※ 経路検索は手持ちから最大10世代まで幅優先探索（BFS）で全自動探索します。パル名横の📌でピン留めすると、下の計算結果カルーセルに常時表示され続け、①②を変更しても最新のルートに自動更新されます。</div>
 </div>
 
 <div class="card">
