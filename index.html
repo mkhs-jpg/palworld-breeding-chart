@@ -2,7 +2,7 @@
 <html lang="ja" data-theme="dark">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>パル配合ルート検索 | Palworld Breeding Helper</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -301,6 +301,21 @@
     border: 1px solid var(--border-strong);
     box-shadow: 0 2px 8px rgba(0,0,0,0.12);
     z-index: 1000;
+  }
+
+  /* ---- スマホ幅向け調整 ---- */
+  @media (max-width: 600px) {
+    body { padding: 20px 14px 90px; }
+    h1 { font-size: 1.35rem; }
+    .subtitle { font-size: 0.9rem; }
+    .card { padding: 16px; }
+    .card h2 { font-size: 0.98rem; }
+    select, button, input, textarea { font-size: 16px; } /* iOSでの自動ズーム防止 */
+    .owned-search { padding: 10px 14px; }
+    .owned-toggle-list { max-height: 220px; }
+    .owned-toggle { padding: 7px 12px; font-size: 0.85rem; }
+    .route-step { flex-wrap: wrap; gap: 8px 14px; }
+    .theme-toggle-btn { bottom: 14px; right: 14px; }
   }
 </style>
 </head>
