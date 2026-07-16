@@ -5,7 +5,7 @@ const LS_KEYS = {
   pals: "pbh_pals_data",
   owned: "pbh_owned_ids"
 };
-const DATA_VERSION = 8; // pals-data.jsonのversionと一致させる。同梱データを更新したら上げる
+const DATA_VERSION = 9; // pals-data.jsonのversionと一致させる。同梱データを更新したら上げる
 
 let PALS = [];
 let BREEDING_EXAMPLES = {};
@@ -14,11 +14,28 @@ let ownedSortMode = "aiueo"; // "aiueo" | "no"
 let targetSortMode = "aiueo";
 let selectedTargetId = null;
 let requiredPalId = null; // ②で指定した「必ず経由する所持パル」(任意、未指定はnull)
+let paldexSortMode = "aiueo";
 
 // 計算結果のスワイプ履歴(①②③で計算した「作りたいパル」の結果を最大件数分さかのぼれる)
 const MAX_HISTORY = 5;
 let resultHistory = []; // [{ targetPal, route, ownedIdSet, requiredPalId }]
 let currentSlideIndex = -1;
+
+// 作業適性タイプの英語キー→日本語表示名。wikiのwork_suitabilityフィールドの表記に合わせる。
+const WORK_TYPE_JA = {
+  "Kindling": "火おこし",
+  "Watering": "水やり",
+  "Planting": "種まき",
+  "Generating Electricity": "発電",
+  "Handiwork": "手作業",
+  "Gathering": "採集",
+  "Lumbering": "伐採",
+  "Mining": "採掘",
+  "Medicine Production": "製薬",
+  "Cooling": "冷却",
+  "Transporting": "運搬",
+  "Farming": "牧場"
+};
 
 init();
 
@@ -28,6 +45,7 @@ function init() {
     renderTargetSelect();
     renderOwnedToggleList();
     renderRequiredToggleList();
+    renderPaldexList();
     bindEvents();
   });
 }
@@ -226,6 +244,76 @@ function updateOwnedCount() {
   document.getElementById("ownedCount").textContent = `選択中: ${ownedIds.size}体`;
 }
 
+// ---------- パル図鑑 ----------
+
+function renderPaldexList(filterText = "") {
+  const list = document.getElementById("paldexList");
+
+  let filtered = PALS;
+  if (filterText) {
+    const query = toKatakana(filterText.toLowerCase().trim());
+    filtered = PALS.filter(p => {
+      const nameKatakana = toKatakana(p.name || "");
+      const nameMatch = nameKatakana.includes(query);
+      const nameEnMatch = p.nameEn && p.nameEn.toLowerCase().includes(query);
+      return nameMatch || nameEnMatch;
+    });
+  }
+
+  const sorted = sortPals(filtered, paldexSortMode);
+
+  list.innerHTML = sorted.map(p => {
+    const workHtml = (p.workSuitability && p.workSuitability.length > 0)
+      ? `<div class="paldex-work-list">${p.workSuitability
+          .map(w => `<span class="paldex-work-badge">${WORK_TYPE_JA[w.type] || w.type} Lv.${w.level}</span>`)
+          .join("")}</div>`
+      : `<div class="paldex-work-list"><span class="paldex-work-empty">作業適性データなし</span></div>`;
+
+    return `
+      <div class="paldex-entry" data-id="${p.id}">
+        <span class="paldex-name">${p.name}</span>
+        <span class="paldex-nameEn">${p.nameEn || ""}</span>
+        <span class="paldex-meta">No.${p.paldexId} ${p.attribute}</span>
+        <span class="paldex-stats">HP${p.hp} 攻${p.attack} 防${p.defense}</span>
+        ${workHtml}
+      </div>
+    `;
+  }).join("");
+
+  list.querySelectorAll(".paldex-entry").forEach(el => {
+    el.addEventListener("click", () => {
+      jumpToTargetFromPaldex(Number(el.dataset.id));
+    });
+  });
+}
+
+function setPaldexSort(mode) {
+  paldexSortMode = mode;
+  document.getElementById("paldexSortAiueo").classList.toggle("on", mode === "aiueo");
+  document.getElementById("paldexSortNo").classList.toggle("on", mode === "no");
+  renderPaldexList(document.getElementById("paldexSearch").value);
+}
+
+// 図鑑からパルをクリックしたら、配合ルート検索タブに切り替えて③(作りたいパル)にセットする。
+// 自動計算はしない(①の所持パル選択はユーザーに委ねる)。
+function jumpToTargetFromPaldex(palId) {
+  selectedTargetId = palId;
+  document.getElementById("targetPalSelect").value = palId;
+  renderTargetSelect(document.getElementById("targetSearch").value);
+  switchView("breeding");
+  document.getElementById("targetSelected").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+// ---------- タブ切り替え(配合ルート検索 / パル図鑑) ----------
+
+function switchView(view) {
+  const isBreeding = view === "breeding";
+  document.getElementById("breedingView").style.display = isBreeding ? "" : "none";
+  document.getElementById("paldexView").style.display = isBreeding ? "none" : "";
+  document.getElementById("tabBreeding").classList.toggle("on", isBreeding);
+  document.getElementById("tabPaldex").classList.toggle("on", !isBreeding);
+}
+
 function bindEvents() {
   document.getElementById("ownedSearch").addEventListener("input", (e) => {
     renderOwnedToggleList(e.target.value);
@@ -239,6 +327,14 @@ function bindEvents() {
   document.getElementById("ownedSortNo").addEventListener("click", () => setOwnedSort("no"));
   document.getElementById("targetSortAiueo").addEventListener("click", () => setTargetSort("aiueo"));
   document.getElementById("targetSortNo").addEventListener("click", () => setTargetSort("no"));
+
+  document.getElementById("tabBreeding").addEventListener("click", () => switchView("breeding"));
+  document.getElementById("tabPaldex").addEventListener("click", () => switchView("paldex"));
+  document.getElementById("paldexSearch").addEventListener("input", (e) => {
+    renderPaldexList(e.target.value);
+  });
+  document.getElementById("paldexSortAiueo").addEventListener("click", () => setPaldexSort("aiueo"));
+  document.getElementById("paldexSortNo").addEventListener("click", () => setPaldexSort("no"));
 
   bindCarouselEvents();
 }

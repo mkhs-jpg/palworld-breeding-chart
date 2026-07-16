@@ -105,6 +105,61 @@
     border-color: var(--accent);
   }
 
+  /* ---- タブ切り替え(配合ルート検索 / パル図鑑) ---- */
+  .view-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .view-tab-btn {
+    background: transparent;
+    color: var(--ink-secondary);
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 4px;
+    font-size: 0.98rem;
+    font-weight: 700;
+    cursor: pointer;
+    margin-bottom: -1px;
+  }
+  .view-tab-btn:hover { color: var(--ink-primary); }
+  .view-tab-btn.on { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ---- パル図鑑 ---- */
+  .paldex-entry {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    padding: 12px 4px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .paldex-entry:last-child { border-bottom: none; }
+  .paldex-entry:hover { background: var(--surface-sunken); }
+  .paldex-name {
+    font-weight: 700;
+    font-size: 0.98rem;
+    color: var(--ink-primary);
+    min-width: 130px;
+  }
+  .paldex-nameEn { color: var(--ink-muted); font-weight: 500; font-size: 0.85rem; }
+  .paldex-meta { color: var(--ink-secondary); font-size: 0.82rem; }
+  .paldex-stats { color: var(--ink-muted); font-size: 0.8rem; }
+  .paldex-work-list { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; margin-top: 4px; }
+  .paldex-work-badge {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 6px;
+    font-size: 0.74rem;
+    font-weight: 600;
+    background: var(--surface-sunken);
+    color: var(--ink-secondary);
+    border: 1px solid var(--border-strong);
+  }
+  .paldex-work-empty { color: var(--ink-muted); font-size: 0.78rem; font-style: italic; }
+
   .card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -374,6 +429,8 @@
     .owned-toggle { padding: 7px 12px; font-size: 0.85rem; }
     .route-step { flex-wrap: wrap; gap: 8px 14px; }
     .theme-toggle-btn { bottom: 14px; right: 14px; }
+    .view-tab-btn { font-size: 0.9rem; padding: 8px 4px; }
+    .paldex-name { min-width: 0; width: 100%; }
     /* 矢印ボタンはカード外に十分な余白が無く本文と重なるため、スマホ幅では非表示(スワイプ+ドットで操作) */
     .carousel-nav-btn { display: none !important; }
   }
@@ -385,6 +442,13 @@
   <h1>Palworld配合ルート検索</h1>
   <div class="subtitle">所持しているパルから目的のパルまでの配合の最適経路を、実例データベースベースで計算します。</div>
 </header>
+
+<div class="view-tabs">
+  <button type="button" class="view-tab-btn on" id="tabBreeding">配合ルート検索</button>
+  <button type="button" class="view-tab-btn" id="tabPaldex">パル図鑑</button>
+</div>
+
+<div id="breedingView">
 
 <div class="card">
   <h2><span>①</span> 持っているパルを選択</h2>
@@ -438,6 +502,23 @@
   <div class="result-dots" id="resultDots"></div>
 </div>
 
+</div>
+
+<div id="paldexView" style="display:none;">
+  <div class="card">
+    <h2>パル図鑑</h2>
+    <div class="hint" style="margin-bottom:12px;">全300種のパル一覧です。パル名をクリックすると「配合ルート検索」タブに切り替わり、③(作りたいパル)にセットされます。</div>
+    <div class="row">
+      <input type="text" id="paldexSearch" class="owned-search" placeholder="パル名や英語名で検索..." style="flex:1;">
+    </div>
+    <div class="row" style="margin-bottom: 12px;">
+      <span class="hint">並び順:</span>
+      <button type="button" class="sort-toggle-btn on" id="paldexSortAiueo" data-sort="aiueo">あいうえお順</button>
+      <button type="button" class="sort-toggle-btn" id="paldexSortNo" data-sort="no">図鑑No順</button>
+    </div>
+    <div id="paldexList"></div>
+  </div>
+</div>
 
 <button id="themeToggle" class="theme-toggle-btn" title="テーマ切り替え">🌓</button>
 
