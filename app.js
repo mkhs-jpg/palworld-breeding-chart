@@ -50,10 +50,18 @@ const WORK_TYPE_JA = {
   "Farming": "牧場"
 };
 
-// タマゴサイズの英語キー→日本語表示名。実際の孵化時間はワールド設定(インキュベーション速度)で
-// 変わってしまい具体的な時間を表示すると誤解を招くため、サイズ表記のみ示す
-// (内部の並び替えコストにはbreeding.jsのEGG_HATCH_HOURSを引き続き使う)。
+// タマゴサイズの英語キー→日本語表示名。
 const EGG_SIZE_JA = { "Normal": "普通", "Large": "デカ", "Huge": "キョダイ" };
+
+// 孵化時間(breeding.jsのEGG_HATCH_HOURS、時間単位の小数)を「◯時間◯分」形式の読みやすい表記に変換する。
+function formatHatchHours(hours) {
+  const totalMinutes = Math.round(hours * 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  if (h === 0) return `${m}分`;
+  if (m === 0) return `${h}時間`;
+  return `${h}時間${m}分`;
+}
 
 init();
 
@@ -700,7 +708,7 @@ function buildRouteText(targetPal, route, requiredId) {
   const isHatchMode = route.totalHatchHours !== undefined;
   const lines = [
     isHatchMode
-      ? `「${targetPal.name}」まで${route.steps.length}回の配合(卵サイズが小さいルート)で到達`
+      ? `「${targetPal.name}」まで${route.steps.length}回の配合(孵化時間合計 目安${formatHatchHours(route.totalHatchHours)})で到達`
       : `「${targetPal.name}」まで${route.generations}世代の配合で到達`
   ];
   route.steps.forEach((s, i) => {
@@ -856,7 +864,7 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
     : "";
 
   const summaryLine = isHatchMode
-    ? `「${targetPal.name}」まで <strong>${route.steps.length}回の配合</strong>(卵サイズが小さいルート)で到達できます。`
+    ? `「${targetPal.name}」まで <strong>${route.steps.length}回の配合</strong>(孵化時間合計 目安 <strong>${formatHatchHours(route.totalHatchHours)}</strong>)で到達できます。`
     : `「${targetPal.name}」まで <strong>${route.generations}世代</strong> の配合で到達できます。`;
 
   return `
