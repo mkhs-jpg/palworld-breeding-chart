@@ -708,15 +708,12 @@ function buildRouteText(targetPal, route, requiredId, ownedIdSet) {
   const isHatchMode = route.totalHatchHours !== undefined;
   const displayHatchHours = isHatchMode ? route.totalHatchHours : computeCriticalPathHours(route.steps, ownedIdSet || new Set());
   const lines = [
-    isHatchMode
-      ? `「${targetPal.name}」まで${route.steps.length}回の配合(孵化時間合計 目安${formatHatchHours(displayHatchHours)})で到達`
-      : `「${targetPal.name}」まで${route.generations}世代の配合(孵化時間合計 目安${formatHatchHours(displayHatchHours)})で到達`
+    `「${targetPal.name}」まで${route.steps.length}回の配合(孵化時間合計 目安${formatHatchHours(displayHatchHours)})で到達`
   ];
   route.steps.forEach((s, i) => {
     const usesRequired = requiredId != null && (s.parentA.id === requiredId || s.parentB.id === requiredId);
     const eggInfo = `(${EGG_SIZE_JA[s.child.eggSize] || "不明"})`;
-    const stepLabel = isHatchMode ? `${i + 1}回目` : `${i + 1}世代目`;
-    lines.push(`${stepLabel}: ${s.parentA.name} × ${s.parentB.name} → ${s.child.name}${eggInfo}${usesRequired ? "(経由指定)" : ""}`);
+    lines.push(`${i + 1}回目: ${s.parentA.name} × ${s.parentB.name} → ${s.child.name}${eggInfo}${usesRequired ? "(経由指定)" : ""}`);
   });
   if (requiredPal) lines.push(`※「経由指定」は「${requiredPal.name}」を実際に配合に使ったステップです。`);
   return lines.join("\n");
@@ -863,9 +860,7 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
     : "";
 
   const displayHatchHours = isHatchMode ? route.totalHatchHours : computeCriticalPathHours(route.steps, ownedIdSet || new Set());
-  const summaryLine = isHatchMode
-    ? `「${targetPal.name}」まで <strong>${route.steps.length}回の配合</strong>(孵化時間合計 目安 <strong>${formatHatchHours(displayHatchHours)}</strong>)で到達できます。`
-    : `「${targetPal.name}」まで <strong>${route.generations}世代</strong> の配合(孵化時間合計 目安 <strong>${formatHatchHours(displayHatchHours)}</strong>)で到達できます。`;
+  const summaryLine = `「${targetPal.name}」まで <strong>${route.steps.length}回の配合</strong>(孵化時間合計 目安 <strong>${formatHatchHours(displayHatchHours)}</strong>)で到達できます。`;
 
   return `
     <div class="result-slide">
