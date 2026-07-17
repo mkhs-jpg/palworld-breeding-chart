@@ -4,7 +4,8 @@
 const LS_KEYS = {
   pals: "pbh_pals_data",
   owned: "pbh_owned_ids",
-  pinned: "pbh_pinned_ids"
+  pinned: "pbh_pinned_ids",
+  excluded: "pbh_excluded_ids"
 };
 const DATA_VERSION = 16; // pals-data.jsonのversionと一致させる。同梱データを更新したら上げる
 
@@ -24,6 +25,11 @@ let paldexOwnedOnly = false; // trueなら所持パルだけに絞り込む
 // ピン留め中のパルは①(所持パル)や②(経由必須パル)を変更するたびに現在の設定でライブ再計算され、
 // 結果カルーセル(横スワイプ)の先頭に常に表示され続ける(計算履歴のように追い出されない)。
 let pinnedIds = [];
+
+// 「今は配合に使えない」として除外中のパルid(性別が合わない等、実機で判明した一時的な制約)。
+// localStorageに永続化し、以後の全ての計算(①②の変更、ピン留めのライブ再計算含む)で
+// 所持パルの候補から取り除かれる。①のチェック自体は外さない(所持していないことにはしない)。
+let excludedIds = new Set();
 
 // 計算結果のスワイプ履歴(①②③で計算した「作りたいパル」の結果を最大件数分さかのぼれる)
 const MAX_HISTORY = 5;
@@ -69,11 +75,13 @@ function init() {
   loadPalsData().then(() => {
     loadOwned();
     loadPinned();
+    loadExcluded();
     renderTargetSelect();
     renderOwnedToggleList();
     renderRequiredToggleList();
     renderPaldexList();
     renderCarousel();
+    updateExcludedIndicator();
     bindEvents();
   });
 }
@@ -132,6 +140,54 @@ function togglePinned(id) {
   transientMessage = null;
   renderTargetSelect(document.getElementById("targetSearch").value);
   renderCarousel();
+}
+
+function loadExcluded() {
+  const saved = localStorage.getItem(LS_KEYS.excluded);
+  if (saved) {
+    try {
+      excludedIds = new Set(JSON.parse(saved));
+    } catch (e) {
+      excludedIds = new Set();
+    }
+  }
+}
+
+function saveExcluded() {
+  localStorage.setItem(LS_KEYS.excluded, JSON.stringify([...excludedIds]));
+}
+
+function updateExcludedIndicator() {
+  const el = document.getElementById("excludedIndicator");
+  if (!el) return;
+  if (excludedIds.size === 0) {
+    el.innerHTML = "";
+    return;
+  }
+  const names = [...excludedIds].map(id => { const p = PALS.find(x => x.id === id); return p ? p.name : null; }).filter(Boolean);
+  el.innerHTML = `除外中(今は使えない): ${names.join("、")} <button type="button" class="secondary" id="clearExcludedBtn" style="padding:2px 10px; font-size:0.8rem;">解除</button>`;
+  document.getElementById("clearExcludedBtn").addEventListener("click", clearExcluded);
+}
+
+function clearExcluded() {
+  excludedIds.clear();
+  saveExcluded();
+  updateExcludedIndicator();
+  renderCarousel();
+}
+
+// 特定のパルを「今は配合に使えない」として除外/解除し、その文脈のターゲットパルについて
+// 別ルートを再計算して履歴に積む(既存のルート探索設定(②/探索方法)はそのまま引き継ぐ)。
+function toggleExcludedAndRecompute(id, targetId) {
+  if (excludedIds.has(id)) excludedIds.delete(id); else excludedIds.add(id);
+  saveExcluded();
+  updateExcludedIndicator();
+
+  const targetPal = PALS.find(p => p.id === targetId);
+  if (!targetPal) { renderCarousel(); return; }
+  const owned = PALS.filter(p => ownedIds.has(p.id));
+  const route = computeRoute(targetPal, owned);
+  pushHistorySlide(targetPal, route, new Set(ownedIds), requiredPalId, { reset: false });
 }
 
 // paldexIdは "005B" "テラ01" "ボス01" のような文字列形式のため、
@@ -459,6 +515,8 @@ function bindCarouselEvents() {
   const carousel = document.getElementById("resultCarousel");
 
   carousel.addEventListener("click", (e) => {
+    const excludeBtn = e.target.closest(".pal-exclude-btn[data-exclude-id]");
+    if (excludeBtn) { toggleExcludedAndRecompute(Number(excludeBtn.dataset.excludeId), Number(excludeBtn.dataset.contextTargetId)); return; }
     const tag = e.target.closest(".pal-tag[data-pal-id]");
     if (tag) { jumpToTarget(Number(tag.dataset.palId)); return; }
     const copyBtn = e.target.closest(".copy-route-btn[data-copy-index]");
@@ -529,14 +587,16 @@ function setTargetSort(mode) {
 
 // routeModeが"hatchtime"なら孵化時間最小のダイクストラ探索、そうでなければ従来の世代数ベースのBFSを使う。
 // requiredPalIdが指定されていれば、どちらのモードでも「経由必須パル」を実際に使ったルートだけを探す。
+// excludedIdsに入っているパルは「今は配合に使えない(性別が合わない等)」として所持リストから一時的に除く。
 function computeRoute(targetPal, owned) {
+  const availableOwned = owned.filter(p => !excludedIds.has(p.id));
   if (routeMode === "hatchtime") {
-    return findBreedingRouteMinHatchTime(PALS, targetPal, owned, BREEDING_EXAMPLES, requiredPalId);
+    return findBreedingRouteMinHatchTime(PALS, targetPal, availableOwned, BREEDING_EXAMPLES, requiredPalId);
   }
   if (requiredPalId != null) {
-    return findBreedingRouteVia(PALS, targetPal, owned, requiredPalId, BREEDING_EXAMPLES, 10);
+    return findBreedingRouteVia(PALS, targetPal, availableOwned, requiredPalId, BREEDING_EXAMPLES, 10);
   }
-  return findBreedingRoute(PALS, targetPal, owned, BREEDING_EXAMPLES, 10);
+  return findBreedingRoute(PALS, targetPal, availableOwned, BREEDING_EXAMPLES, 10);
 }
 
 function setRouteMode(mode) {
@@ -786,6 +846,20 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
   const pinBtnHtml = `<button type="button" class="secondary pin-toggle-btn ${pinned ? "pinned" : ""}" data-pin-id="${targetPal.id}">${pinned ? "📌 ピン留め中" : "📌 ピン留めする"}</button>`;
 
   if (route.reason === "already-owned") {
+    // 「既に持っている」だけで終わらせず、性別が合う個体を追加で配合したい場合等のために
+    // 対象パル自身を所持プールから除いた上でもう1匹分のルートを試算する。
+    const ownedWithoutTarget = ownedIdSet ? [...ownedIdSet].filter(pid => pid !== targetPal.id) : [];
+    const ownedPalsWithoutTarget = PALS.filter(p => ownedWithoutTarget.includes(p.id));
+    const altRoute = ownedPalsWithoutTarget.length > 0 ? computeRoute(targetPal, ownedPalsWithoutTarget) : null;
+
+    if (altRoute && altRoute.found && altRoute.steps.length > 0) {
+      const altHtml = buildSlideHtml(targetPal, altRoute, new Set(ownedWithoutTarget), requiredId, slideIndex, pinned);
+      return altHtml.replace(
+        '<div class="route-actions">',
+        `<p class="hint" style="margin-bottom:10px;">「${targetPal.name}」はすでに持っています。性別が合う個体が欲しい場合など、もう1匹配合したい時のルート:</p><div class="route-actions">`
+      );
+    }
+
     return `
       <div class="result-slide">
         <div class="route-actions">
@@ -829,13 +903,15 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
 
   const palTag = (pal) => {
     const isOwned = ownedIdSet && ownedIdSet.has(pal.id);
+    const isExcluded = excludedIds.has(pal.id);
     const ownedClass = isOwned ? "pal-tag-owned" : "pal-tag-bred";
     // 色分けは「配合で生まれるパル」同士の再利用を追うためのものなので、
     // 持っているパル(常に緑背景で固定)には適用しない。
     const color = !isOwned ? palColorMap.get(pal.id) : null;
     const colorStyle = color ? ` style="border-color:${color}; color:${color};"` : "";
     const icon = `<img class="pal-tag-icon" src="images/pal-${pal.paldexId.toLowerCase()}.png" alt="" loading="lazy" onerror="this.style.display='none'">`;
-    return `<span class="pal-tag ${ownedClass}"${colorStyle} data-pal-id="${pal.id}" title="クリックでこのパルへの配合ルートを見る">${icon}${pal.name}</span>`;
+    const excludeBtn = `<button type="button" class="pal-exclude-btn ${isExcluded ? "excluded" : ""}" data-exclude-id="${pal.id}" data-context-target-id="${targetPal.id}" title="このパルは今使えない(性別が合わない等)。押すと別ルートを再計算します">🚫</button>`;
+    return `<span class="pal-tag ${ownedClass}${isExcluded ? " pal-tag-excluded" : ""}"${colorStyle} data-pal-id="${pal.id}" title="クリックでこのパルへの配合ルートを見る">${icon}${pal.name}${excludeBtn}</span>`;
   };
 
   const stepsHtml = route.steps.map((s, i) => {

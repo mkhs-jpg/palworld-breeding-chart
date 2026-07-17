@@ -373,6 +373,25 @@
     border: 1px solid var(--border-strong);
   }
   .pal-tag-bred:hover { background: var(--surface); border-color: var(--ink-muted); }
+  .pal-tag-excluded { text-decoration: line-through; opacity: 0.55; }
+
+  .pal-exclude-btn {
+    margin-left: 2px;
+    padding: 0 5px;
+    font-size: 0.72rem;
+    line-height: 1.5;
+    border-radius: 4px;
+    background: transparent;
+    border: 1px solid transparent;
+    opacity: 0.35;
+    cursor: pointer;
+  }
+  .pal-exclude-btn:hover { opacity: 1; background: rgba(0, 0, 0, 0.12); }
+  .pal-exclude-btn.excluded {
+    opacity: 1;
+    background: var(--status-critical);
+    border-color: var(--status-critical);
+  }
 
   .route-actions {
     display: flex;
@@ -547,6 +566,7 @@
   </div>
   <div class="owned-toggle-list" id="ownedToggleList"></div>
   <div class="owned-count" id="ownedCount">選択中: 0体</div>
+  <div class="hint" id="excludedIndicator" style="margin-top:8px;"></div>
 </div>
 
 <div class="card">
