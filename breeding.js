@@ -311,15 +311,18 @@ function findBreedingRouteVia(pals, targetPal, ownedPals, requiredPalId, example
 // 適温でない場合(インキュベーション速度×1.0)の値を基準に採用(適温にすると最大半分まで短縮される)。
 const EGG_HATCH_HOURS = { Normal: 6, Large: 36, Huge: 72 };
 
+// タマゴサイズが判明していないパルは、実際より短く見積もって最適ルートから不当に除外してしまう
+// (=本来もっと速いルートを見逃す)ことを避けるため、安全側(最も時間がかかる"Huge"相当)に倒して計算する。
+// 表示用のバッジ(app.js)はpal.eggSizeそのもの(null=不明)を見るので、ここでの仮定とは独立している。
 function getHatchHours(pal) {
-  return pal.eggSize ? (EGG_HATCH_HOURS[pal.eggSize] != null ? EGG_HATCH_HOURS[pal.eggSize] : null) : null;
+  return pal.eggSize && EGG_HATCH_HOURS[pal.eggSize] != null ? EGG_HATCH_HOURS[pal.eggSize] : EGG_HATCH_HOURS.Huge;
 }
 
 // 「世代数」ではなく「配合で生まれるタマゴの孵化時間の合計」が最小になる経路をダイクストラ法で探す。
 // 複数の配合を並行して進められる(=両親がそれぞれ独立に用意できるなら待ち時間は長い方だけで済む)ことを
 // 前提に、あるパルを手に入れるまでのコストを「両親のコストの大きい方 + 自分自身のタマゴの孵化時間」として
 // 定義し、これを状態ごとの最短コストとして確定させていく(コストに負値が無いためダイクストラ法が使える)。
-// タマゴサイズ(孵化時間)が不明なパルが生まれる組み合わせは、不明な値を仮定せず経路から除外する。
+// タマゴサイズ(孵化時間)が不明なパルはgetHatchHoursが安全側の値を返すため、経路から除外されることはない。
 //
 // requiredPalIdを指定した場合はfindBreedingRouteViaと同様、状態を「経由必須パルを実際に配合の親として
 // 使ったか(color: "with"/"without")」で2色に分けて管理し、それぞれ独立に最短コストを求める。
@@ -407,7 +410,6 @@ function findBreedingRouteMinHatchTime(pals, targetPal, ownedPals, exampleMap = 
       const { child, exact, isExample, unknown } = breedOnce(pals, uPal, vPal, exampleMap);
       if (unknown) continue;
       const hatchHours = getHatchHours(child);
-      if (hatchHours == null) continue; // 孵化時間不明なパルが生まれる組み合わせは採用しない
 
       const usesRequired = requiredPalId != null && (uPal.id === requiredPalId || vPal.id === requiredPalId) && uPal.id !== vPal.id;
       const childColor = (uColor === "with" || vColor === "with" || usesRequired) ? "with" : "without";

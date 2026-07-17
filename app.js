@@ -805,7 +805,6 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
 
   if (!route.found) {
     const limitNote = isHatchMode ? "" : "10世代以内に";
-    const eggNote = isHatchMode ? "卵サイズが不明なパルを経由するルートは対象外になるため、見つからないことがあります。" : "中間素材となるパルを他の方法で入手すると経路が見つかりやすくなります。";
     const summary = requiredPal
       ? `「${requiredPal.name}」を使った配合ルートは、${limitNote}「${targetPal.name}」へ到達できませんでした。`
       : `持っているパルの組み合わせでは、${limitNote}「${targetPal.name}」へ到達できませんでした。`;
@@ -815,7 +814,7 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
           <p class="result-summary" style="margin-bottom:0;">${summary}</p>
           ${pinBtnHtml}
         </div>
-        <p class="hint">${eggNote}</p>
+        <p class="hint">中間素材となるパルを他の方法で入手すると経路が見つかりやすくなります。</p>
       </div>
     `;
   }
@@ -857,7 +856,7 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
     : "";
 
   const hatchModeNote = isHatchMode
-    ? `<p class="hint" style="margin-top:6px;">※タマゴサイズ(普通/デカ/キョダイ)が小さいほど孵化が早くなりますが、実際の時間はワールド設定(インキュベーション速度など)で変わるため具体的な時間は表示していません。</p>`
+    ? `<p class="hint" style="margin-top:6px;">※タマゴサイズ(普通/デカ/キョダイ)が小さいほど孵化が早くなりますが、実際の時間はワールド設定(インキュベーション速度など)で変わるため具体的な時間は表示していません。卵サイズが判明していない中間パルは安全側に「キョダイ」相当として計算しています(「不明」バッジのステップは実際にはもっと早い可能性があります)。</p>`
     : "";
 
   const summaryLine = isHatchMode
