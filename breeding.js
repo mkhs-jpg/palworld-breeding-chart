@@ -306,6 +306,157 @@ function findBreedingRouteVia(pals, targetPal, ownedPals, requiredPalId, example
   return { found: false, generations: maxGenerations, steps: [], reason: "not-found-within-limit" };
 }
 
+// タマゴサイズ別の孵化時間の目安(時間)。
+// 出典: palworld.wiki.gg「Egg Incubator」記事のIncubation Time表、
+// 適温でない場合(インキュベーション速度×1.0)の値を基準に採用(適温にすると最大半分まで短縮される)。
+const EGG_HATCH_HOURS = { Normal: 6, Large: 36, Huge: 72 };
+
+function getHatchHours(pal) {
+  return pal.eggSize ? (EGG_HATCH_HOURS[pal.eggSize] != null ? EGG_HATCH_HOURS[pal.eggSize] : null) : null;
+}
+
+// 「世代数」ではなく「配合で生まれるタマゴの孵化時間の合計」が最小になる経路をダイクストラ法で探す。
+// 複数の配合を並行して進められる(=両親がそれぞれ独立に用意できるなら待ち時間は長い方だけで済む)ことを
+// 前提に、あるパルを手に入れるまでのコストを「両親のコストの大きい方 + 自分自身のタマゴの孵化時間」として
+// 定義し、これを状態ごとの最短コストとして確定させていく(コストに負値が無いためダイクストラ法が使える)。
+// タマゴサイズ(孵化時間)が不明なパルが生まれる組み合わせは、不明な値を仮定せず経路から除外する。
+//
+// requiredPalIdを指定した場合はfindBreedingRouteViaと同様、状態を「経由必須パルを実際に配合の親として
+// 使ったか(color: "with"/"without")」で2色に分けて管理し、それぞれ独立に最短コストを求める。
+// requiredPalIdが未指定の場合は常に"without"色のみを使う(色の区別を実質無視する)。
+//
+// 戻り値: { found, totalHatchHours, steps: [{parentA, parentB, child, hatchHours, exact, isExample}], reason }
+function findBreedingRouteMinHatchTime(pals, targetPal, ownedPals, exampleMap = {}, requiredPalId = null) {
+  if (requiredPalId != null && !ownedPals.some(p => p.id === requiredPalId)) {
+    return { found: false, totalHatchHours: 0, steps: [], reason: "required-pal-not-owned" };
+  }
+  if (ownedPals.some(p => p.id === targetPal.id)) {
+    return { found: true, totalHatchHours: 0, steps: [], reason: "already-owned" };
+  }
+  if (ownedPals.length === 0) {
+    return { found: false, totalHatchHours: 0, steps: [], reason: "no-owned-pals" };
+  }
+
+  const key = (id, color) => `${id}:${color}`;
+  const dist = new Map(); // "id:color" -> 現時点で判明している最短の合計孵化時間(時間)
+  const via = new Map(); // "id:color" -> {parentAKey, parentBKey, parentA, parentB, child, hatchHours, exact, isExample}
+  const finalized = new Set();
+
+  // lazy-deletion方式の単純な二分ヒープ(状態数は最大 パル数×2 程度なので十分高速)
+  const heap = [];
+  function heapPush(d, k) {
+    heap.push([d, k]);
+    let i = heap.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (heap[p][0] <= heap[i][0]) break;
+      [heap[p], heap[i]] = [heap[i], heap[p]];
+      i = p;
+    }
+  }
+  function heapPop() {
+    if (heap.length === 0) return null;
+    const top = heap[0];
+    const last = heap.pop();
+    if (heap.length > 0) {
+      heap[0] = last;
+      let i = 0;
+      while (true) {
+        const l = i * 2 + 1, r = i * 2 + 2;
+        let smallest = i;
+        if (l < heap.length && heap[l][0] < heap[smallest][0]) smallest = l;
+        if (r < heap.length && heap[r][0] < heap[smallest][0]) smallest = r;
+        if (smallest === i) break;
+        [heap[smallest], heap[i]] = [heap[i], heap[smallest]];
+        i = smallest;
+      }
+    }
+    return top;
+  }
+
+  for (const p of ownedPals) {
+    const k = key(p.id, "without");
+    if (!dist.has(k)) {
+      dist.set(k, 0);
+      heapPush(0, k);
+    }
+  }
+
+  const targetKeyGoal = key(targetPal.id, requiredPalId != null ? "with" : "without");
+  let found = false;
+
+  while (heap.length > 0) {
+    const [d, uKey] = heapPop();
+    if (finalized.has(uKey)) continue; // 古いエントリ
+    if (d > dist.get(uKey)) continue; // より良い値が既に見つかっている古いエントリ
+    finalized.add(uKey);
+    if (uKey === targetKeyGoal) { found = true; break; }
+
+    const sep = uKey.lastIndexOf(":");
+    const uId = Number(uKey.slice(0, sep));
+    const uColor = uKey.slice(sep + 1);
+    const uPal = pals.find(p => p.id === uId);
+
+    for (const vKey of finalized) {
+      const vSep = vKey.lastIndexOf(":");
+      const vId = Number(vKey.slice(0, vSep));
+      const vColor = vKey.slice(vSep + 1);
+      const vPal = pals.find(p => p.id === vId);
+      const vDist = dist.get(vKey);
+
+      const { child, exact, isExample, unknown } = breedOnce(pals, uPal, vPal, exampleMap);
+      if (unknown) continue;
+      const hatchHours = getHatchHours(child);
+      if (hatchHours == null) continue; // 孵化時間不明なパルが生まれる組み合わせは採用しない
+
+      const usesRequired = requiredPalId != null && (uPal.id === requiredPalId || vPal.id === requiredPalId) && uPal.id !== vPal.id;
+      const childColor = (uColor === "with" || vColor === "with" || usesRequired) ? "with" : "without";
+      const newCost = Math.max(d, vDist) + hatchHours;
+      const childKey = key(child.id, childColor);
+      const cur = dist.has(childKey) ? dist.get(childKey) : Infinity;
+      if (newCost < cur) {
+        dist.set(childKey, newCost);
+        via.set(childKey, { parentAKey: uKey, parentBKey: vKey, parentA: uPal, parentB: vPal, child, hatchHours, exact, isExample });
+        heapPush(newCost, childKey);
+      }
+    }
+  }
+
+  if (!found) {
+    return { found: false, totalHatchHours: 0, steps: [], reason: "not-found" };
+  }
+
+  const steps = [];
+  const visited = new Set();
+  function backtrack(k) {
+    if (visited.has(k)) return;
+    visited.add(k);
+    const v = via.get(k);
+    if (!v) return; // 手持ち初期パル(コスト0)はここで終端
+    backtrack(v.parentAKey);
+    backtrack(v.parentBKey);
+    steps.push({
+      parentA: v.parentA,
+      parentB: v.parentB,
+      child: v.child,
+      hatchHours: v.hatchHours,
+      exact: v.exact,
+      isExample: v.isExample
+    });
+  }
+  backtrack(targetKeyGoal);
+
+  return {
+    found: true,
+    totalHatchHours: dist.get(targetKeyGoal),
+    steps,
+    reason: requiredPalId != null ? "bred-via-min-hatch" : "bred-min-hatch"
+  };
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { computeChildPower, findClosestPals, breedOnce, findBreedingCombos, findBreedingRoute, findBreedingRouteVia };
+  module.exports = {
+    computeChildPower, findClosestPals, breedOnce, findBreedingCombos, findBreedingRoute, findBreedingRouteVia,
+    EGG_HATCH_HOURS, getHatchHours, findBreedingRouteMinHatchTime
+  };
 }

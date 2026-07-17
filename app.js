@@ -6,7 +6,7 @@ const LS_KEYS = {
   owned: "pbh_owned_ids",
   pinned: "pbh_pinned_ids"
 };
-const DATA_VERSION = 10; // pals-data.jsonのversionと一致させる。同梱データを更新したら上げる
+const DATA_VERSION = 11; // pals-data.jsonのversionと一致させる。同梱データを更新したら上げる
 
 let PALS = [];
 let BREEDING_EXAMPLES = {};
@@ -15,6 +15,7 @@ let ownedSortMode = "aiueo"; // "aiueo" | "no"
 let targetSortMode = "aiueo";
 let selectedTargetId = null;
 let requiredPalId = null; // ②で指定した「必ず経由する所持パル」(任意、未指定はnull)
+let routeMode = "generations"; // "generations"(最短世代、既定) | "hatchtime"(孵化時間最小)
 let paldexSortMode = "aiueo";
 let paldexWorkSortType = null; // 指定した作業適性タイプの高い順に並べる(未指定はnull、あいうえお順/図鑑No順を優先)
 let paldexOwnedOnly = false; // trueなら所持パルだけに絞り込む
@@ -48,6 +49,11 @@ const WORK_TYPE_JA = {
   "Transporting": "運搬",
   "Farming": "牧場"
 };
+
+// タマゴサイズの英語キー→日本語表示名。実際の孵化時間はワールド設定(インキュベーション速度)で
+// 変わってしまい具体的な時間を表示すると誤解を招くため、サイズ表記のみ示す
+// (内部の並び替えコストにはbreeding.jsのEGG_HATCH_HOURSを引き続き使う)。
+const EGG_SIZE_JA = { "Normal": "普通", "Large": "デカ", "Huge": "キョダイ" };
 
 init();
 
@@ -328,12 +334,17 @@ function renderPaldexList(filterText = "") {
           .join("")}</div>`
       : `<div class="paldex-work-list"><span class="paldex-work-empty">作業適性データなし</span></div>`;
 
+    const eggHtml = p.eggSize
+      ? `<span class="egg-size-badge egg-size-${p.eggSize.toLowerCase()}">🥚 ${EGG_SIZE_JA[p.eggSize]}</span>`
+      : `<span class="paldex-work-empty">卵サイズ不明</span>`;
+
     return `
       <div class="paldex-entry" data-id="${p.id}">
         <img class="paldex-icon" src="images/pal-${p.paldexId.toLowerCase()}.png" alt="" loading="lazy" onerror="this.style.display='none'">
         <span class="paldex-name">${p.name}</span>
         <span class="paldex-meta">No.${p.paldexId} ${p.attribute}</span>
         <span class="paldex-stats">HP${p.hp} 攻${p.attack} 防${p.defense}</span>
+        ${eggHtml}
         ${workHtml}
       </div>
     `;
@@ -418,6 +429,8 @@ function bindEvents() {
   document.getElementById("ownedSortNo").addEventListener("click", () => setOwnedSort("no"));
   document.getElementById("targetSortAiueo").addEventListener("click", () => setTargetSort("aiueo"));
   document.getElementById("targetSortNo").addEventListener("click", () => setTargetSort("no"));
+  document.getElementById("routeModeGenerations").addEventListener("click", () => setRouteMode("generations"));
+  document.getElementById("routeModeHatchTime").addEventListener("click", () => setRouteMode("hatchtime"));
 
   document.getElementById("tabBreeding").addEventListener("click", () => switchView("breeding"));
   document.getElementById("tabPaldex").addEventListener("click", () => switchView("paldex"));
@@ -506,12 +519,24 @@ function setTargetSort(mode) {
 
 // ---------- 配合ルート計算 ----------
 
-// requiredPalIdが指定されていればfindBreedingRouteVia、無ければ通常のfindBreedingRouteを使う。
+// routeModeが"hatchtime"なら孵化時間最小のダイクストラ探索、そうでなければ従来の世代数ベースのBFSを使う。
+// requiredPalIdが指定されていれば、どちらのモードでも「経由必須パル」を実際に使ったルートだけを探す。
 function computeRoute(targetPal, owned) {
+  if (routeMode === "hatchtime") {
+    return findBreedingRouteMinHatchTime(PALS, targetPal, owned, BREEDING_EXAMPLES, requiredPalId);
+  }
   if (requiredPalId != null) {
     return findBreedingRouteVia(PALS, targetPal, owned, requiredPalId, BREEDING_EXAMPLES, 10);
   }
   return findBreedingRoute(PALS, targetPal, owned, BREEDING_EXAMPLES, 10);
+}
+
+function setRouteMode(mode) {
+  routeMode = mode;
+  document.getElementById("routeModeGenerations").classList.toggle("on", mode === "generations");
+  document.getElementById("routeModeHatchTime").classList.toggle("on", mode === "hatchtime");
+  // ピン留め中のパルはモード変更にもライブ追従させる(履歴側の過去の計算結果はそのモード時点の表示のまま残す)。
+  renderCarousel();
 }
 
 function calcRoute() {
@@ -672,10 +697,17 @@ const ROUTE_REUSE_COLOR_VARS = [
 // 計算結果をプレーンテキストに変換する(クリップボードコピー用)。
 function buildRouteText(targetPal, route, requiredId) {
   const requiredPal = requiredId != null ? PALS.find(p => p.id === requiredId) : null;
-  const lines = [`「${targetPal.name}」まで${route.generations}世代の配合で到達`];
+  const isHatchMode = route.totalHatchHours !== undefined;
+  const lines = [
+    isHatchMode
+      ? `「${targetPal.name}」まで${route.steps.length}回の配合(卵サイズが小さいルート)で到達`
+      : `「${targetPal.name}」まで${route.generations}世代の配合で到達`
+  ];
   route.steps.forEach((s, i) => {
     const usesRequired = requiredId != null && (s.parentA.id === requiredId || s.parentB.id === requiredId);
-    lines.push(`${i + 1}世代目: ${s.parentA.name} × ${s.parentB.name} → ${s.child.name}${usesRequired ? "(経由指定)" : ""}`);
+    const eggInfo = isHatchMode ? `(${EGG_SIZE_JA[s.child.eggSize] || "不明"})` : "";
+    const stepLabel = isHatchMode ? `${i + 1}回目` : `${i + 1}世代目`;
+    lines.push(`${stepLabel}: ${s.parentA.name} × ${s.parentB.name} → ${s.child.name}${eggInfo}${usesRequired ? "(経由指定)" : ""}`);
   });
   if (requiredPal) lines.push(`※「経由指定」は「${requiredPal.name}」を実際に配合に使ったステップです。`);
   return lines.join("\n");
@@ -769,17 +801,21 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
     `;
   }
 
+  const isHatchMode = route.totalHatchHours !== undefined;
+
   if (!route.found) {
+    const limitNote = isHatchMode ? "" : "10世代以内に";
+    const eggNote = isHatchMode ? "卵サイズが不明なパルを経由するルートは対象外になるため、見つからないことがあります。" : "中間素材となるパルを他の方法で入手すると経路が見つかりやすくなります。";
     const summary = requiredPal
-      ? `「${requiredPal.name}」を使った配合ルートは、10世代以内に「${targetPal.name}」へ到達できませんでした。`
-      : `持っているパルの組み合わせでは、10世代以内に「${targetPal.name}」へ到達できませんでした。`;
+      ? `「${requiredPal.name}」を使った配合ルートは、${limitNote}「${targetPal.name}」へ到達できませんでした。`
+      : `持っているパルの組み合わせでは、${limitNote}「${targetPal.name}」へ到達できませんでした。`;
     return `
       <div class="result-slide">
         <div class="route-actions">
           <p class="result-summary" style="margin-bottom:0;">${summary}</p>
           ${pinBtnHtml}
         </div>
-        <p class="hint">中間素材となるパルを他の方法で入手すると経路が見つかりやすくなります。</p>
+        <p class="hint">${eggNote}</p>
       </div>
     `;
   }
@@ -799,6 +835,9 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
 
   const stepsHtml = route.steps.map((s, i) => {
     const usesRequired = requiredId != null && (s.parentA.id === requiredId || s.parentB.id === requiredId);
+    const eggBadge = isHatchMode
+      ? `<span class="egg-size-badge egg-size-${(s.child.eggSize || "unknown").toLowerCase()}">🥚 ${EGG_SIZE_JA[s.child.eggSize] || "不明"}</span>`
+      : "";
     return `
     <div class="route-step">
       <div class="route-gen-badge">${i + 1}</div>
@@ -806,6 +845,7 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
         ${palTag(s.parentA)} ×
         ${palTag(s.parentB)} →
         ${palTag(s.child)}
+        ${eggBadge}
         ${usesRequired ? '<span class="badge required">経由指定</span>' : ""}
       </div>
     </div>
@@ -816,10 +856,18 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
     ? `<p class="hint" style="margin-top:6px;">※「経由指定」バッジは「${requiredPal.name}」を実際に配合に使ったステップです。</p>`
     : "";
 
+  const hatchModeNote = isHatchMode
+    ? `<p class="hint" style="margin-top:6px;">※タマゴサイズ(普通/デカ/キョダイ)が小さいほど孵化が早くなりますが、実際の時間はワールド設定(インキュベーション速度など)で変わるため具体的な時間は表示していません。</p>`
+    : "";
+
+  const summaryLine = isHatchMode
+    ? `「${targetPal.name}」まで <strong>${route.steps.length}回の配合</strong>(卵サイズが小さいルート)で到達できます。`
+    : `「${targetPal.name}」まで <strong>${route.generations}世代</strong> の配合で到達できます。`;
+
   return `
     <div class="result-slide">
       <div class="route-actions">
-        <p class="result-summary">「${targetPal.name}」まで <strong>${route.generations}世代</strong> の配合で到達できます。</p>
+        <p class="result-summary">${summaryLine}</p>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
           ${pinBtnHtml}
           <button type="button" class="secondary copy-route-btn" data-copy-index="${slideIndex}">結果をコピー</button>
@@ -832,6 +880,7 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
       </div>
       <div>${stepsHtml}</div>
       ${requiredNote}
+      ${hatchModeNote}
     </div>
   `;
 }

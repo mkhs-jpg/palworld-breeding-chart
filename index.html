@@ -172,6 +172,20 @@
   .paldex-work-empty { color: var(--ink-muted); font-size: 0.78rem; font-style: italic; }
   .paldex-work-badge.sorted { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 
+  /* ---- タマゴサイズ(孵化時間)バッジ ---- */
+  .egg-size-badge {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 6px;
+    font-size: 0.74rem;
+    font-weight: 600;
+    border: 1px solid var(--border-strong);
+    white-space: nowrap;
+  }
+  .egg-size-badge.egg-size-normal { background: var(--surface-sunken); color: var(--status-good); border-color: var(--status-good); }
+  .egg-size-badge.egg-size-large { background: var(--surface-sunken); color: var(--status-warning); border-color: var(--status-warning); }
+  .egg-size-badge.egg-size-huge { background: var(--surface-sunken); color: var(--status-serious); border-color: var(--status-serious); }
+
   .paldex-owned-only-label {
     display: flex;
     align-items: center;
@@ -555,6 +569,12 @@
   <div class="owned-toggle-list" id="targetToggleList" style="max-height:200px;"></div>
   <div class="owned-count" id="targetSelected" style="margin-bottom:12px;">未選択</div>
   <input type="hidden" id="targetPalSelect" value="">
+  <div class="row" style="margin-top: 16px; margin-bottom: 0;">
+    <span class="hint">探索方法:</span>
+    <button type="button" class="sort-toggle-btn on" id="routeModeGenerations" data-mode="generations">最短世代</button>
+    <button type="button" class="sort-toggle-btn" id="routeModeHatchTime" data-mode="hatchtime">孵化時間最小</button>
+  </div>
+  <div class="hint" style="margin-bottom:0;">※「孵化時間最小」は配合で生まれるタマゴのサイズ(普通/デカ/キョダイ)が小さくなるルートを探します。実際の孵化時間はワールド設定で変わるため具体的な時間は表示しません。卵サイズが判明していないパルを経由するルートは対象外になるため、「最短世代」より見つかりにくいことがあります。</div>
   <div class="row" style="margin-top: 16px;">
     <button id="btnCalc" style="width: 100%; padding: 14px; font-size: 1.05rem;">配合ルートを計算する</button>
   </div>
