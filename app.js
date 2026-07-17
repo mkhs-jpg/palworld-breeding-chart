@@ -6,7 +6,7 @@ const LS_KEYS = {
   owned: "pbh_owned_ids",
   pinned: "pbh_pinned_ids"
 };
-const DATA_VERSION = 14; // pals-data.jsonのversionと一致させる。同梱データを更新したら上げる
+const DATA_VERSION = 15; // pals-data.jsonのversionと一致させる。同梱データを更新したら上げる
 
 let PALS = [];
 let BREEDING_EXAMPLES = {};
