@@ -714,7 +714,7 @@ function buildRouteText(targetPal, route, requiredId, ownedIdSet) {
   ];
   route.steps.forEach((s, i) => {
     const usesRequired = requiredId != null && (s.parentA.id === requiredId || s.parentB.id === requiredId);
-    const eggInfo = isHatchMode ? `(${EGG_SIZE_JA[s.child.eggSize] || "不明"})` : "";
+    const eggInfo = `(${EGG_SIZE_JA[s.child.eggSize] || "不明"})`;
     const stepLabel = isHatchMode ? `${i + 1}回目` : `${i + 1}世代目`;
     lines.push(`${stepLabel}: ${s.parentA.name} × ${s.parentB.name} → ${s.child.name}${eggInfo}${usesRequired ? "(経由指定)" : ""}`);
   });
@@ -843,9 +843,7 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
 
   const stepsHtml = route.steps.map((s, i) => {
     const usesRequired = requiredId != null && (s.parentA.id === requiredId || s.parentB.id === requiredId);
-    const eggBadge = isHatchMode
-      ? `<span class="egg-size-badge egg-size-${(s.child.eggSize || "unknown").toLowerCase()}">🥚 ${EGG_SIZE_JA[s.child.eggSize] || "不明"}</span>`
-      : "";
+    const eggBadge = `<span class="egg-size-badge egg-size-${(s.child.eggSize || "unknown").toLowerCase()}">🥚 ${EGG_SIZE_JA[s.child.eggSize] || "不明"}</span>`;
     return `
     <div class="route-step">
       <div class="route-gen-badge">${i + 1}</div>

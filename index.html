@@ -569,18 +569,19 @@
   <div class="owned-toggle-list" id="targetToggleList" style="max-height:200px;"></div>
   <div class="owned-count" id="targetSelected" style="margin-bottom:12px;">未選択</div>
   <input type="hidden" id="targetPalSelect" value="">
-  <div class="row" style="margin-top: 16px; margin-bottom: 0;">
-    <span class="hint">探索方法:</span>
-    <button type="button" class="sort-toggle-btn on" id="routeModeGenerations" data-mode="generations">最短世代</button>
-    <button type="button" class="sort-toggle-btn" id="routeModeHatchTime" data-mode="hatchtime">孵化時間最小</button>
-  </div>
   <div class="row" style="margin-top: 16px;">
     <button id="btnCalc" style="width: 100%; padding: 14px; font-size: 1.05rem;">配合ルートを計算する</button>
   </div>
 </div>
 
 <div class="card">
-  <h2>計算結果</h2>
+  <h2 style="justify-content: space-between;">
+    <span>計算結果</span>
+    <span style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button type="button" class="sort-toggle-btn on" id="routeModeGenerations" data-mode="generations">最短世代</button>
+      <button type="button" class="sort-toggle-btn" id="routeModeHatchTime" data-mode="hatchtime">孵化時間最小</button>
+    </span>
+  </h2>
   <div class="result-carousel-wrap">
     <button type="button" class="carousel-nav-btn carousel-nav-prev" id="carouselPrev" aria-label="前の結果へ" style="display:none;">‹</button>
     <div class="result-carousel" id="resultCarousel">
