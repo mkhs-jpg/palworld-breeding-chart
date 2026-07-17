@@ -323,6 +323,24 @@ function getHatchHours(pal) {
   return pal.eggSize && EGG_HATCH_HOURS[pal.eggSize] != null ? EGG_HATCH_HOURS[pal.eggSize] : WORST_CASE_HATCH_HOURS;
 }
 
+// 任意の配合ステップ列(トポロジカル順、最後のステップの子が目的のパル)について、
+// 依存関係のない配合は並行して進められる前提で合計孵化時間(クリティカルパス)を計算する。
+// findBreedingRouteMinHatchTime専用ではなく、findBreedingRoute/findBreedingRouteViaの結果を
+// 表示用に評価する際にも使う(ステップ自体はhatchHoursフィールドを持たなくてもよい)。
+function computeCriticalPathHours(steps, ownedIds) {
+  if (steps.length === 0) return 0;
+  const ready = new Map();
+  for (const id of ownedIds) ready.set(id, 0);
+  let lastChildId = null;
+  for (const s of steps) {
+    const aReady = ready.has(s.parentA.id) ? ready.get(s.parentA.id) : 0;
+    const bReady = ready.has(s.parentB.id) ? ready.get(s.parentB.id) : 0;
+    ready.set(s.child.id, Math.max(aReady, bReady) + getHatchHours(s.child));
+    lastChildId = s.child.id;
+  }
+  return ready.get(lastChildId);
+}
+
 // 「世代数」ではなく「配合で生まれるタマゴの孵化時間の合計」が最小になる経路をダイクストラ法で探す。
 // 複数の配合を並行して進められる(=両親がそれぞれ独立に用意できるなら待ち時間は長い方だけで済む)ことを
 // 前提に、あるパルを手に入れるまでのコストを「両親のコストの大きい方 + 自分自身のタマゴの孵化時間」として
@@ -464,6 +482,6 @@ function findBreedingRouteMinHatchTime(pals, targetPal, ownedPals, exampleMap = 
 if (typeof module !== "undefined") {
   module.exports = {
     computeChildPower, findClosestPals, breedOnce, findBreedingCombos, findBreedingRoute, findBreedingRouteVia,
-    EGG_HATCH_HOURS, getHatchHours, findBreedingRouteMinHatchTime
+    EGG_HATCH_HOURS, getHatchHours, findBreedingRouteMinHatchTime, computeCriticalPathHours
   };
 }

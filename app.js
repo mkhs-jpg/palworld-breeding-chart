@@ -703,13 +703,14 @@ const ROUTE_REUSE_COLOR_VARS = [
 ];
 
 // 計算結果をプレーンテキストに変換する(クリップボードコピー用)。
-function buildRouteText(targetPal, route, requiredId) {
+function buildRouteText(targetPal, route, requiredId, ownedIdSet) {
   const requiredPal = requiredId != null ? PALS.find(p => p.id === requiredId) : null;
   const isHatchMode = route.totalHatchHours !== undefined;
+  const displayHatchHours = isHatchMode ? route.totalHatchHours : computeCriticalPathHours(route.steps, ownedIdSet || new Set());
   const lines = [
     isHatchMode
-      ? `「${targetPal.name}」まで${route.steps.length}回の配合(孵化時間合計 目安${formatHatchHours(route.totalHatchHours)})で到達`
-      : `「${targetPal.name}」まで${route.generations}世代の配合で到達`
+      ? `「${targetPal.name}」まで${route.steps.length}回の配合(孵化時間合計 目安${formatHatchHours(displayHatchHours)})で到達`
+      : `「${targetPal.name}」まで${route.generations}世代の配合(孵化時間合計 目安${formatHatchHours(displayHatchHours)})で到達`
   ];
   route.steps.forEach((s, i) => {
     const usesRequired = requiredId != null && (s.parentA.id === requiredId || s.parentB.id === requiredId);
@@ -726,7 +727,7 @@ function buildRouteText(targetPal, route, requiredId) {
 async function copyRouteText(index) {
   const h = lastSlides[index];
   if (!h || h.message || !h.route.found) return;
-  const text = buildRouteText(h.targetPal, h.route, h.requiredId);
+  const text = buildRouteText(h.targetPal, h.route, h.requiredId, h.ownedIdSet);
   const btn = document.querySelector(`.copy-route-btn[data-copy-index="${index}"]`);
   const showResult = (label) => {
     if (!btn) return;
@@ -863,9 +864,10 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
     ? `<p class="hint" style="margin-top:6px;">※「経由指定」バッジは「${requiredPal.name}」を実際に配合に使ったステップです。</p>`
     : "";
 
+  const displayHatchHours = isHatchMode ? route.totalHatchHours : computeCriticalPathHours(route.steps, ownedIdSet || new Set());
   const summaryLine = isHatchMode
-    ? `「${targetPal.name}」まで <strong>${route.steps.length}回の配合</strong>(孵化時間合計 目安 <strong>${formatHatchHours(route.totalHatchHours)}</strong>)で到達できます。`
-    : `「${targetPal.name}」まで <strong>${route.generations}世代</strong> の配合で到達できます。`;
+    ? `「${targetPal.name}」まで <strong>${route.steps.length}回の配合</strong>(孵化時間合計 目安 <strong>${formatHatchHours(displayHatchHours)}</strong>)で到達できます。`
+    : `「${targetPal.name}」まで <strong>${route.generations}世代</strong> の配合(孵化時間合計 目安 <strong>${formatHatchHours(displayHatchHours)}</strong>)で到達できます。`;
 
   return `
     <div class="result-slide">
