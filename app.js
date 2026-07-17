@@ -6,7 +6,7 @@ const LS_KEYS = {
   owned: "pbh_owned_ids",
   pinned: "pbh_pinned_ids"
 };
-const DATA_VERSION = 12; // pals-data.jsonのversionと一致させる。同梱データを更新したら上げる
+const DATA_VERSION = 14; // pals-data.jsonのversionと一致させる。同梱データを更新したら上げる
 
 let PALS = [];
 let BREEDING_EXAMPLES = {};
@@ -855,10 +855,6 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
     ? `<p class="hint" style="margin-top:6px;">※「経由指定」バッジは「${requiredPal.name}」を実際に配合に使ったステップです。</p>`
     : "";
 
-  const hatchModeNote = isHatchMode
-    ? `<p class="hint" style="margin-top:6px;">※タマゴサイズ(普通/デカ/キョダイ)が小さいほど孵化が早くなりますが、実際の時間はワールド設定(インキュベーション速度など)で変わるため具体的な時間は表示していません。卵サイズが判明していない中間パルは安全側に「キョダイ」相当として計算しています(「不明」バッジのステップは実際にはもっと早い可能性があります)。</p>`
-    : "";
-
   const summaryLine = isHatchMode
     ? `「${targetPal.name}」まで <strong>${route.steps.length}回の配合</strong>(卵サイズが小さいルート)で到達できます。`
     : `「${targetPal.name}」まで <strong>${route.generations}世代</strong> の配合で到達できます。`;
@@ -879,7 +875,6 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
       </div>
       <div>${stepsHtml}</div>
       ${requiredNote}
-      ${hatchModeNote}
     </div>
   `;
 }
