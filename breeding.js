@@ -101,6 +101,10 @@ function findBreedingCombos(pals, targetPal, ownedIds = null, exampleMap = {}) {
 // 手持ちパルを起点に、目的のパルへ到達するまでの配合経路を幅優先探索で求める。
 // 各世代で「今まで手に入っているパル全部」同士を掛け合わせて生まれる新しいパルを
 // 手持ちに追加していき、目的のパルが生まれた時点の経路を返す。
+// 世代数(依存関係の深さ)を最優先で最小化しつつ、同じ世代内で複数の親ペアから同じ子が
+// 作れる場合は「そのペアを得るまでに必要な配合回数の概算(stepsCost)」が少ない方を選ぶことで、
+// 世代数が同じ中では配合の総回数もなるべく少なくなるようにする(単純な最初に見つかった組み合わせ
+// 採用ではなく、コスト比較で選ぶ)。
 // pals: 全パルデータ, targetPal: 目的のパル, ownedPals: 手持ちパル配列, maxGenerations: 最大世代数
 // 戻り値: { found: bool, generations: number, steps: [{parentA, parentB, child, childPower, exact, isExample}], ownedAtEnd: [Pal] } | null
 function findBreedingRoute(pals, targetPal, ownedPals, exampleMap = {}, maxGenerations = 6) {
@@ -114,12 +118,14 @@ function findBreedingRoute(pals, targetPal, ownedPals, exampleMap = {}, maxGener
   // ownedのidセットと、そのパルがどうやって手に入ったか(手持ち初期 or 配合)を記録
   const obtainedIds = new Set(ownedPals.map(p => p.id));
   const obtainedVia = new Map(); // id -> {parentA, parentB, childPower, exact, isExample} 手持ち初期はundefined
-  let frontier = [...ownedPals]; // 今の世代で使える全パル(このgenerationまでに手に入った分)
+  // 各パルを得るまでに必要な配合回数の概算(親同士の重複=同じパルの再利用は考慮しない単純合算のため、
+  // 実際の最終ステップ数の下限目安。同じ世代内での親ペア選びのタイブレークにのみ使う)。
+  const stepsCost = new Map(ownedPals.map(p => [p.id, 0]));
 
   for (let gen = 1; gen <= maxGenerations; gen++) {
     const pool = [...obtainedIds].map(id => pals.find(p => p.id === id));
     const newlyObtained = []; // このgenerationで新しく生まれたパル
-    const newlyObtainedFirstParents = new Map(); // id -> {parentA, parentB, childPower, exact, isExample}
+    const newlyObtainedBestParents = new Map(); // id -> {parentA, parentB, childPower, exact, isExample, cost}
 
     for (let i = 0; i < pool.length; i++) {
       for (let j = i; j < pool.length; j++) {
@@ -127,17 +133,22 @@ function findBreedingRoute(pals, targetPal, ownedPals, exampleMap = {}, maxGener
         const b = pool[j];
         const { child, childPower, exact, isExample, unknown } = breedOnce(pals, a, b, exampleMap);
         if (unknown) continue;
+        if (obtainedIds.has(child.id)) continue;
 
-        if (!obtainedIds.has(child.id) && !newlyObtainedFirstParents.has(child.id)) {
-          newlyObtainedFirstParents.set(child.id, { parentA: a, parentB: b, childPower, exact, isExample });
-          newlyObtained.push(child);
+        const cost = stepsCost.get(a.id) + stepsCost.get(b.id) + 1;
+        const existing = newlyObtainedBestParents.get(child.id);
+        if (!existing || cost < existing.cost) {
+          if (!existing) newlyObtained.push(child);
+          newlyObtainedBestParents.set(child.id, { parentA: a, parentB: b, childPower, exact, isExample, cost });
         }
       }
     }
 
     for (const child of newlyObtained) {
       obtainedIds.add(child.id);
-      obtainedVia.set(child.id, newlyObtainedFirstParents.get(child.id));
+      const best = newlyObtainedBestParents.get(child.id);
+      obtainedVia.set(child.id, best);
+      stepsCost.set(child.id, best.cost);
     }
 
     if (obtainedIds.has(targetPal.id)) {
@@ -199,10 +210,14 @@ function findBreedingRouteVia(pals, targetPal, ownedPals, requiredPalId, example
   // 同じパル(id)がwithout側/with側の両方に別々に存在しうる(例: 違う親同士を配合したら
   // たまたま経由必須パルと同じ種が生まれた、等)ため、backtrackは id 単体ではなく
   // 「id + どちらの色から来た参照か」で管理する。via側にも親それぞれの色を記録しておく。
+  // findBreedingRouteと同様、同じ世代内で複数の親ペアから同じ子が作れる場合は
+  // 配合回数の概算(stepsCost、色ごとに別管理)が少ない方を選ぶ。
   const withoutIds = new Set(ownedPals.map(p => p.id));
   const withIds = new Set();
-  const viaWithout = new Map(); // id -> { parentA, parentAColor, parentB, parentBColor, childPower, exact, isExample }
+  const viaWithout = new Map(); // id -> { parentA, parentAColor, parentB, parentBColor, childPower, exact, isExample, cost }
   const viaWith = new Map();
+  const stepsCostWithout = new Map(ownedPals.map(p => [p.id, 0]));
+  const stepsCostWith = new Map();
 
   for (let gen = 1; gen <= maxGenerations; gen++) {
     const withoutPool = [...withoutIds].map(id => pals.find(p => p.id === id));
@@ -212,6 +227,21 @@ function findBreedingRouteVia(pals, targetPal, ownedPals, requiredPalId, example
     const newWithoutParents = new Map();
     const newWith = [];
     const newWithParents = new Map();
+
+    const considerWithout = (child, entry, cost) => {
+      const existing = newWithoutParents.get(child.id);
+      if (!existing || cost < existing.cost) {
+        if (!existing) newWithout.push(child);
+        newWithoutParents.set(child.id, { ...entry, cost });
+      }
+    };
+    const considerWith = (child, entry, cost) => {
+      const existing = newWithParents.get(child.id);
+      if (!existing || cost < existing.cost) {
+        if (!existing) newWith.push(child);
+        newWithParents.set(child.id, { ...entry, cost });
+      }
+    };
 
     // 1. without × without (両方とも"without"色)
     for (let i = 0; i < withoutPool.length; i++) {
@@ -224,16 +254,11 @@ function findBreedingRouteVia(pals, targetPal, ownedPals, requiredPalId, example
         // (同じ種を持ったままwith集合へ無意味に昇格させてしまうのを防ぐ)。
         const usesRequired = (a.id === requiredPalId || b.id === requiredPalId) && a.id !== b.id;
         const entry = { parentA: a, parentAColor: "without", parentB: b, parentBColor: "without", childPower, exact, isExample };
+        const cost = stepsCostWithout.get(a.id) + stepsCostWithout.get(b.id) + 1;
         if (usesRequired) {
-          if (!withIds.has(child.id) && !newWithParents.has(child.id)) {
-            newWithParents.set(child.id, entry);
-            newWith.push(child);
-          }
+          if (!withIds.has(child.id)) considerWith(child, entry, cost);
         } else {
-          if (!withoutIds.has(child.id) && !newWithoutParents.has(child.id)) {
-            newWithoutParents.set(child.id, entry);
-            newWithout.push(child);
-          }
+          if (!withoutIds.has(child.id)) considerWithout(child, entry, cost);
         }
       }
     }
@@ -243,10 +268,9 @@ function findBreedingRouteVia(pals, targetPal, ownedPals, requiredPalId, example
       for (const b of withoutPool) {
         const { child, childPower, exact, isExample, unknown } = breedOnce(pals, a, b, exampleMap);
         if (unknown) continue;
-        if (!withIds.has(child.id) && !newWithParents.has(child.id)) {
-          newWithParents.set(child.id, { parentA: a, parentAColor: "with", parentB: b, parentBColor: "without", childPower, exact, isExample });
-          newWith.push(child);
-        }
+        if (withIds.has(child.id)) continue;
+        const cost = stepsCostWith.get(a.id) + stepsCostWithout.get(b.id) + 1;
+        considerWith(child, { parentA: a, parentAColor: "with", parentB: b, parentBColor: "without", childPower, exact, isExample }, cost);
       }
     }
 
@@ -256,20 +280,23 @@ function findBreedingRouteVia(pals, targetPal, ownedPals, requiredPalId, example
         const a = withPool[i], b = withPool[j];
         const { child, childPower, exact, isExample, unknown } = breedOnce(pals, a, b, exampleMap);
         if (unknown) continue;
-        if (!withIds.has(child.id) && !newWithParents.has(child.id)) {
-          newWithParents.set(child.id, { parentA: a, parentAColor: "with", parentB: b, parentBColor: "with", childPower, exact, isExample });
-          newWith.push(child);
-        }
+        if (withIds.has(child.id)) continue;
+        const cost = stepsCostWith.get(a.id) + stepsCostWith.get(b.id) + 1;
+        considerWith(child, { parentA: a, parentAColor: "with", parentB: b, parentBColor: "with", childPower, exact, isExample }, cost);
       }
     }
 
     for (const c of newWithout) {
       withoutIds.add(c.id);
-      viaWithout.set(c.id, newWithoutParents.get(c.id));
+      const best = newWithoutParents.get(c.id);
+      viaWithout.set(c.id, best);
+      stepsCostWithout.set(c.id, best.cost);
     }
     for (const c of newWith) {
       withIds.add(c.id);
-      viaWith.set(c.id, newWithParents.get(c.id));
+      const best = newWithParents.get(c.id);
+      viaWith.set(c.id, best);
+      stepsCostWith.set(c.id, best.cost);
     }
 
     if (withIds.has(targetPal.id)) {
@@ -308,9 +335,9 @@ function findBreedingRouteVia(pals, targetPal, ownedPals, requiredPalId, example
 
 // タマゴサイズ別の孵化時間の目安(時間)。ユーザーのワールド設定に合わせた値。
 // 基準値(palworld.wiki.gg「Egg Incubator」記事、適温でない場合): Normal=6h, Large=36h, Huge=72h。
-// ユーザー環境ではHugeの実測値が4h(基準値の1/18)だったため、ワールド設定の孵化速度倍率が
-// 全サイズに一律で効くとみなし、Normal/Largeも同じ1/18倍で換算した。
-const EGG_HATCH_HOURS = { Normal: 6 / 18, Large: 36 / 18, Huge: 72 / 18 };
+// ユーザー環境ではHugeの実測値が2h(基準値の1/36)だったため、ワールド設定の孵化速度倍率が
+// 全サイズに一律で効くとみなし、Normal/Largeも同じ1/36倍で換算した。
+const EGG_HATCH_HOURS = { Normal: 6 / 36, Large: 36 / 36, Huge: 72 / 36 };
 
 // タマゴサイズが判明していないパルは、実際より短く見積もって最適ルートから不当に除外してしまう
 // (=本来もっと速いルートを見逃す)ことを避けるため、安全側(既知のサイズの中で最も時間がかかる値)に倒して計算する。
