@@ -307,9 +307,10 @@ function findBreedingRouteVia(pals, targetPal, ownedPals, requiredPalId, example
 }
 
 // タマゴサイズ別の孵化時間の目安(時間)。ユーザーのワールド設定に合わせた値。
-// Normal/Largeはpalworld.wiki.gg「Egg Incubator」記事のIncubation Time表(適温でない場合)を基準に採用、
-// Hugeはユーザー環境の実測値(4時間)を採用。
-const EGG_HATCH_HOURS = { Normal: 6, Large: 36, Huge: 4 };
+// 基準値(palworld.wiki.gg「Egg Incubator」記事、適温でない場合): Normal=6h, Large=36h, Huge=72h。
+// ユーザー環境ではHugeの実測値が4h(基準値の1/18)だったため、ワールド設定の孵化速度倍率が
+// 全サイズに一律で効くとみなし、Normal/Largeも同じ1/18倍で換算した。
+const EGG_HATCH_HOURS = { Normal: 6 / 18, Large: 36 / 18, Huge: 72 / 18 };
 
 // タマゴサイズが判明していないパルは、実際より短く見積もって最適ルートから不当に除外してしまう
 // (=本来もっと速いルートを見逃す)ことを避けるため、安全側(既知のサイズの中で最も時間がかかる値)に倒して計算する。
