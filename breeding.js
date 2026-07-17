@@ -306,16 +306,20 @@ function findBreedingRouteVia(pals, targetPal, ownedPals, requiredPalId, example
   return { found: false, generations: maxGenerations, steps: [], reason: "not-found-within-limit" };
 }
 
-// タマゴサイズ別の孵化時間の目安(時間)。
-// 出典: palworld.wiki.gg「Egg Incubator」記事のIncubation Time表、
-// 適温でない場合(インキュベーション速度×1.0)の値を基準に採用(適温にすると最大半分まで短縮される)。
-const EGG_HATCH_HOURS = { Normal: 6, Large: 36, Huge: 72 };
+// タマゴサイズ別の孵化時間の目安(時間)。ユーザーのワールド設定に合わせた値。
+// Normal/Largeはpalworld.wiki.gg「Egg Incubator」記事のIncubation Time表(適温でない場合)を基準に採用、
+// Hugeはユーザー環境の実測値(4時間)を採用。
+const EGG_HATCH_HOURS = { Normal: 6, Large: 36, Huge: 4 };
 
 // タマゴサイズが判明していないパルは、実際より短く見積もって最適ルートから不当に除外してしまう
-// (=本来もっと速いルートを見逃す)ことを避けるため、安全側(最も時間がかかる"Huge"相当)に倒して計算する。
+// (=本来もっと速いルートを見逃す)ことを避けるため、安全側(既知のサイズの中で最も時間がかかる値)に倒して計算する。
+// EGG_HATCH_HOURSの大小関係(通常はHuge>Large>Normalだが、ユーザー環境の設定次第で入れ替わりうる)に
+// 依存しないよう、特定のサイズ名を決め打ちせずMath.maxで安全側の値を毎回動的に求める。
 // 表示用のバッジ(app.js)はpal.eggSizeそのもの(null=不明)を見るので、ここでの仮定とは独立している。
+const WORST_CASE_HATCH_HOURS = Math.max(...Object.values(EGG_HATCH_HOURS));
+
 function getHatchHours(pal) {
-  return pal.eggSize && EGG_HATCH_HOURS[pal.eggSize] != null ? EGG_HATCH_HOURS[pal.eggSize] : EGG_HATCH_HOURS.Huge;
+  return pal.eggSize && EGG_HATCH_HOURS[pal.eggSize] != null ? EGG_HATCH_HOURS[pal.eggSize] : WORST_CASE_HATCH_HOURS;
 }
 
 // 「世代数」ではなく「配合で生まれるタマゴの孵化時間の合計」が最小になる経路をダイクストラ法で探す。
