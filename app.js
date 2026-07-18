@@ -5,7 +5,17 @@ const LS_KEYS = {
   pals: "pbh_pals_data",
   owned: "pbh_owned_ids",
   pinned: "pbh_pinned_ids",
-  excluded: "pbh_excluded_ids"
+  excluded: "pbh_excluded_ids",
+  ghToken: "pbh_github_token"
+};
+
+// GitHub連携(手持ちデータのバックアップ)の保存先。
+// 公開ページ(main)とは別のuserdataブランチに保存することで、ローカルからのmainへのpushと
+// 競合せず、ビルドスクリプト(build-data.js)の複製対象とも干渉しない。
+const GH_SYNC = {
+  repo: "mkhs-jpg/palworld-breeding-chart",
+  path: "userdata.json",
+  branch: "userdata"
 };
 const DATA_VERSION = 19; // pals-data.jsonのversionと一致させる。同梱データを更新したら上げる
 
@@ -200,6 +210,150 @@ function clearExcluded() {
   saveExcluded();
   updateExcludedIndicator();
   renderCarousel();
+}
+
+// ---------- GitHub連携(手持ちデータのバックアップ・別端末との同期) ----------
+// Fine-grained PAT(このリポジトリ限定・Contents読み書きのみ)をユーザーが一度入力すると
+// 「管理者モード」になり、userdataブランチのuserdata.jsonへ保存/読み込みできる。
+// トークンはlocalStorageにのみ保存し、外部には送信しない(GitHub API呼び出しを除く)。
+
+function getGhToken() {
+  return localStorage.getItem(LS_KEYS.ghToken) || "";
+}
+
+function setGhToken(token) {
+  if (token) localStorage.setItem(LS_KEYS.ghToken, token);
+  else localStorage.removeItem(LS_KEYS.ghToken);
+  updateSyncUi();
+}
+
+function setSyncStatus(msg, isError = false) {
+  const el = document.getElementById("syncStatus");
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = isError ? "var(--status-critical)" : "var(--ink-secondary)";
+}
+
+function updateSyncUi() {
+  const hasToken = !!getGhToken();
+  document.getElementById("syncSetup").style.display = hasToken ? "none" : "";
+  document.getElementById("syncActions").style.display = hasToken ? "" : "none";
+}
+
+function ghHeaders(token) {
+  return {
+    "Authorization": "Bearer " + token,
+    "Accept": "application/vnd.github+json"
+  };
+}
+
+// UTF-8安全なbase64エンコード/デコード(データはid数値のみだが将来の拡張に備える)
+function toBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = "";
+  bytes.forEach(b => { bin += String.fromCharCode(b); });
+  return btoa(bin);
+}
+function fromBase64(b64) {
+  const bin = atob(b64.replace(/\n/g, ""));
+  const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+async function ghSave() {
+  const token = getGhToken();
+  if (!token) return;
+  setSyncStatus("保存中...");
+  const api = `https://api.github.com/repos/${GH_SYNC.repo}/contents/${GH_SYNC.path}`;
+  try {
+    // 既存ファイルのsha取得(更新時に必要。無ければ新規作成)
+    let sha = null;
+    const getRes = await fetch(`${api}?ref=${GH_SYNC.branch}`, { headers: ghHeaders(token) });
+    if (getRes.status === 200) sha = (await getRes.json()).sha;
+    else if (getRes.status === 401 || getRes.status === 403) { setSyncStatus("トークンが無効か権限不足です。連携解除して再設定してください。", true); return; }
+
+    const payload = {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      owned: [...ownedIds],
+      pinned: pinnedIds,
+      excluded: [...excludedIds]
+    };
+    const body = {
+      message: "userdata: 手持ちデータを保存",
+      content: toBase64(JSON.stringify(payload, null, 2)),
+      branch: GH_SYNC.branch
+    };
+    if (sha) body.sha = sha;
+
+    const putRes = await fetch(api, { method: "PUT", headers: { ...ghHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (putRes.ok) {
+      setSyncStatus(`保存しました(${new Date().toLocaleString("ja-JP")})`);
+    } else {
+      const err = await putRes.json().catch(() => ({}));
+      setSyncStatus(`保存に失敗しました(${putRes.status}): ${err.message || ""}`, true);
+    }
+  } catch (e) {
+    setSyncStatus("保存に失敗しました(通信エラー): " + e.message, true);
+  }
+}
+
+async function ghLoad() {
+  const token = getGhToken();
+  if (!token) return;
+  setSyncStatus("読み込み中...");
+  const api = `https://api.github.com/repos/${GH_SYNC.repo}/contents/${GH_SYNC.path}`;
+  try {
+    const res = await fetch(`${api}?ref=${GH_SYNC.branch}`, { headers: ghHeaders(token) });
+    if (res.status === 404) { setSyncStatus("まだ保存データがありません。先に「GitHubに保存」を実行してください。", true); return; }
+    if (!res.ok) { setSyncStatus(`読み込みに失敗しました(${res.status})`, true); return; }
+    const json = await res.json();
+    const data = JSON.parse(fromBase64(json.content));
+
+    ownedIds = new Set(data.owned || []);
+    pinnedIds.length = 0;
+    (data.pinned || []).forEach(id => pinnedIds.push(id));
+    excludedIds = new Set(data.excluded || []);
+    if (requiredPalId != null && !ownedIds.has(requiredPalId)) requiredPalId = null;
+    saveOwned();
+    savePinned();
+    saveExcluded();
+    pinnedRouteCache.clear();
+
+    renderOwnedToggleList(document.getElementById("ownedSearch").value);
+    renderRequiredToggleList();
+    renderTargetSelect(document.getElementById("targetSearch").value);
+    renderPaldexList(document.getElementById("paldexSearch").value);
+    updateExcludedIndicator();
+    renderCarousel();
+
+    const savedAt = data.savedAt ? new Date(data.savedAt).toLocaleString("ja-JP") : "不明";
+    setSyncStatus(`読み込みました(保存日時: ${savedAt}、所持${ownedIds.size}体)`);
+  } catch (e) {
+    setSyncStatus("読み込みに失敗しました(通信エラー): " + e.message, true);
+  }
+}
+
+function bindSyncEvents() {
+  document.getElementById("syncSetupToggle").addEventListener("click", () => {
+    const form = document.getElementById("syncTokenForm");
+    form.style.display = form.style.display === "none" ? "" : "none";
+  });
+  document.getElementById("syncTokenSave").addEventListener("click", () => {
+    const input = document.getElementById("syncTokenInput");
+    const token = input.value.trim();
+    if (!token) { setSyncStatus("トークンを入力してください。", true); return; }
+    setGhToken(token);
+    input.value = "";
+    setSyncStatus("トークンを設定しました。「GitHubに保存」でバックアップできます。");
+  });
+  document.getElementById("ghSaveBtn").addEventListener("click", ghSave);
+  document.getElementById("ghLoadBtn").addEventListener("click", ghLoad);
+  document.getElementById("ghDisconnectBtn").addEventListener("click", () => {
+    setGhToken("");
+    setSyncStatus("連携を解除しました(トークンをこの端末から削除しました)。");
+  });
+  updateSyncUi();
 }
 
 // 特定のパルを「今は配合に使えない」として除外/解除し、その文脈のターゲットパルについて
@@ -533,6 +687,7 @@ function bindEvents() {
   document.getElementById("paldexOwnedOnly").addEventListener("change", (e) => setPaldexOwnedOnly(e.target.checked));
 
   bindCarouselEvents();
+  bindSyncEvents();
 }
 
 // 計算結果カルーセル: パルタグ/コピー/ピンボタンのクリックはスライドが動的に再構築されるためイベント委譲で受ける。

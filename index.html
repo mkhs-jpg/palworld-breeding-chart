@@ -648,10 +648,37 @@
   </div>
 </div>
 
+<div class="card">
+  <h2>データのバックアップ(GitHub連携)</h2>
+  <div class="hint" style="margin-bottom:12px;">手持ちの選択状態はブラウザ(localStorage)に自動保存されますが、閲覧データの削除や端末変更で消えることがあります。GitHubのアクセストークン(このリポジトリ限定のFine-grained PAT)を設定すると、手持ち・ピン留め・除外の状態をGitHubに保存し、別端末からも読み込めます。トークンはこの端末のブラウザ内にのみ保存されます。</div>
+  <div id="syncSetup">
+    <button type="button" class="secondary" id="syncSetupToggle">GitHub連携を設定する</button>
+    <div id="syncTokenForm" style="display:none; margin-top:12px;">
+      <div class="hint" style="margin-bottom:8px;">
+        トークンの作り方: GitHub → Settings → Developer settings → Personal access tokens → <strong>Fine-grained tokens</strong> → Generate new token。
+        Repository accessで「Only select repositories」→ <strong>palworld-breeding-chart</strong> を選択し、
+        PermissionsのContentsを<strong>Read and write</strong>にして発行した「github_pat_」で始まるトークンを貼り付けてください。
+      </div>
+      <div class="row">
+        <input type="password" id="syncTokenInput" class="owned-search" placeholder="github_pat_..." style="flex:1; margin-bottom:0;">
+        <button type="button" id="syncTokenSave">設定</button>
+      </div>
+    </div>
+  </div>
+  <div id="syncActions" style="display:none;">
+    <div class="row" style="margin-bottom:8px;">
+      <button type="button" id="ghSaveBtn">GitHubに保存</button>
+      <button type="button" class="secondary" id="ghLoadBtn">GitHubから読み込み</button>
+      <button type="button" class="secondary" id="ghDisconnectBtn">連携解除</button>
+    </div>
+  </div>
+  <div class="hint" id="syncStatus" style="margin-top:8px;"></div>
+</div>
+
 <button id="themeToggle" class="theme-toggle-btn" title="テーマ切り替え">🌓</button>
 
 <footer>
-  <p>ローカル動作のみ。手持ちの選択状態はブラウザ(localStorage)に自動保存されます。</p>
+  <p>手持ちの選択状態はブラウザ(localStorage)に自動保存されます。GitHub連携を設定するとGitHubにもバックアップできます。</p>
 </footer>
 
 <script src="data.js"></script>
