@@ -30,6 +30,8 @@ let routeMode = "generations"; // "generations"(最短世代、既定) | "hatcht
 let paldexSortMode = "aiueo";
 let paldexWorkSortType = null; // 指定した作業適性タイプの高い順に並べる(未指定はnull、あいうえお順/図鑑No順を優先)
 let paldexOwnedOnly = false; // trueなら所持パルだけに絞り込む
+let comboParentId = null; // 総当り配合タブで親として選択中の所持パル(未選択はnull)
+let comboNewOnly = false; // trueなら「持っていない子パル」だけを表示
 
 // ピン留めした「作りたいパル」のid一覧(順序=ピン留めした順)。localStorageに永続化する。
 // ピン留め中のパルは①(所持パル)や②(経由必須パル)を変更するたびに現在の設定でライブ再計算され、
@@ -653,11 +655,114 @@ function jumpToTargetFromPaldex(palId) {
 // ---------- タブ切り替え(配合ルート検索 / パル図鑑) ----------
 
 function switchView(view) {
-  const isBreeding = view === "breeding";
-  document.getElementById("breedingView").style.display = isBreeding ? "" : "none";
-  document.getElementById("paldexView").style.display = isBreeding ? "none" : "";
-  document.getElementById("tabBreeding").classList.toggle("on", isBreeding);
-  document.getElementById("tabPaldex").classList.toggle("on", !isBreeding);
+  const views = { breeding: ["breedingView", "tabBreeding"], paldex: ["paldexView", "tabPaldex"], combos: ["combosView", "tabCombos"] };
+  for (const [key, [viewId, tabId]] of Object.entries(views)) {
+    document.getElementById(viewId).style.display = key === view ? "" : "none";
+    document.getElementById(tabId).classList.toggle("on", key === view);
+  }
+  // 総当りタブは①の所持パル変更に追従させるため、開くたびに最新の所持リストで再描画する
+  if (view === "combos") {
+    renderComboParentList(document.getElementById("comboParentSearch").value);
+    renderComboResults();
+  }
+}
+
+// ---------- 総当り配合(親1匹×所持パル全員で1回の配合で作れるパル一覧) ----------
+
+function renderComboParentList(filterText = "") {
+  const list = document.getElementById("comboParentList");
+  let owned = PALS.filter(p => ownedIds.has(p.id));
+
+  // 選択中の親が①から外されていたら選択解除
+  if (comboParentId != null && !ownedIds.has(comboParentId)) comboParentId = null;
+
+  if (filterText) {
+    const query = toKatakana(filterText.toLowerCase().trim());
+    owned = owned.filter(p => {
+      const nameMatch = toKatakana(p.name || "").includes(query);
+      const nameEnMatch = p.nameEn && p.nameEn.toLowerCase().includes(query);
+      return nameMatch || nameEnMatch;
+    });
+  }
+
+  const sorted = sortPals(owned, ownedSortMode);
+  list.innerHTML = sorted.map(p => `
+    <div class="owned-toggle ${comboParentId === p.id ? "on" : ""}" data-id="${p.id}">${p.name}</div>
+  `).join("");
+
+  list.querySelectorAll(".owned-toggle").forEach(el => {
+    el.addEventListener("click", () => {
+      const id = Number(el.dataset.id);
+      comboParentId = comboParentId === id ? null : id;
+      list.querySelectorAll(".owned-toggle").forEach(t => {
+        t.classList.toggle("on", Number(t.dataset.id) === comboParentId);
+      });
+      renderComboResults();
+    });
+  });
+}
+
+function renderComboResults() {
+  const box = document.getElementById("comboResults");
+  const countEl = document.getElementById("comboParentSelected");
+
+  if (comboParentId == null) {
+    countEl.textContent = "未選択";
+    box.innerHTML = `<p class="hint">上の一覧から親にするパルを1匹選んでください。</p>`;
+    return;
+  }
+  const parent = PALS.find(p => p.id === comboParentId);
+  countEl.textContent = `親: ${parent.name}`;
+
+  const owned = PALS.filter(p => ownedIds.has(p.id));
+  // 子パルごとに「どの相手と配合すれば生まれるか」をまとめる(自分自身との配合=同種も含む)
+  const byChild = new Map();
+  for (const b of owned) {
+    const r = breedOnce(PALS, parent, b, BREEDING_EXAMPLES);
+    if (r.unknown || !r.child) continue;
+    if (!byChild.has(r.child.id)) byChild.set(r.child.id, { child: r.child, partners: [] });
+    byChild.get(r.child.id).partners.push(b);
+  }
+
+  let entries = [...byChild.values()].sort((a, b) => a.child.name.localeCompare(b.child.name, "ja"));
+  const totalKinds = entries.length;
+  if (comboNewOnly) entries = entries.filter(e => !ownedIds.has(e.child.id));
+
+  if (entries.length === 0) {
+    box.innerHTML = `<p class="hint">${comboNewOnly ? "この親からは、まだ持っていないパルは生まれません。" : "計算可能な組み合わせがありません。"}</p>`;
+    return;
+  }
+
+  const rows = entries.map(e => {
+    const c = e.child;
+    const isOwned = ownedIds.has(c.id);
+    const eggBadge = `<span class="egg-size-badge egg-size-${(c.eggSize || "unknown").toLowerCase()}">🥚 ${EGG_SIZE_JA[c.eggSize] || "不明"}</span>`;
+    const newBadge = isOwned ? "" : `<span class="badge required">未所持</span>`;
+    const partnerNames = e.partners.map(p => p.name).join("、");
+    return `
+      <div class="combo-row" data-id="${c.id}">
+        <div class="combo-child">
+          <img class="paldex-icon" src="images/pal-${c.paldexId.toLowerCase()}.png" alt="" loading="lazy" onerror="this.style.display='none'">
+          <span class="paldex-name">${c.name}</span>
+          ${eggBadge}
+          ${newBadge}
+        </div>
+        <div class="combo-partners">相手: ${partnerNames}</div>
+      </div>
+    `;
+  }).join("");
+
+  const summary = comboNewOnly
+    ? `「${parent.name}」から1回の配合で作れるパル: ${totalKinds}種類(うち未所持 ${entries.length}種類)`
+    : `「${parent.name}」から1回の配合で作れるパル: ${totalKinds}種類`;
+
+  box.innerHTML = `<p class="hint" style="margin-bottom:8px;">${summary}。パル名をクリックすると配合ルート検索の③にセットされます。</p>${rows}`;
+
+  box.querySelectorAll(".combo-row").forEach(el => {
+    el.addEventListener("click", () => {
+      jumpToTargetFromPaldex(Number(el.dataset.id));
+    });
+  });
 }
 
 function bindEvents() {
@@ -678,6 +783,14 @@ function bindEvents() {
 
   document.getElementById("tabBreeding").addEventListener("click", () => switchView("breeding"));
   document.getElementById("tabPaldex").addEventListener("click", () => switchView("paldex"));
+  document.getElementById("tabCombos").addEventListener("click", () => switchView("combos"));
+  document.getElementById("comboParentSearch").addEventListener("input", (e) => {
+    renderComboParentList(e.target.value);
+  });
+  document.getElementById("comboNewOnly").addEventListener("change", (e) => {
+    comboNewOnly = e.target.checked;
+    renderComboResults();
+  });
   document.getElementById("paldexSearch").addEventListener("input", (e) => {
     renderPaldexList(e.target.value);
   });

@@ -186,6 +186,27 @@
   .egg-size-badge.egg-size-large { background: var(--surface-sunken); color: var(--status-warning); border-color: var(--status-warning); }
   .egg-size-badge.egg-size-huge { background: var(--surface-sunken); color: var(--status-serious); border-color: var(--status-serious); }
 
+  /* ---- 総当り配合の結果行 ---- */
+  .combo-row {
+    padding: 10px 4px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .combo-row:last-child { border-bottom: none; }
+  .combo-row:hover { background: var(--surface-sunken); }
+  .combo-child {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .combo-partners {
+    margin-top: 4px;
+    font-size: 0.8rem;
+    color: var(--ink-muted);
+    line-height: 1.6;
+  }
+
   .paldex-owned-only-label {
     display: flex;
     align-items: center;
@@ -549,6 +570,7 @@
 
 <div class="view-tabs">
   <button type="button" class="view-tab-btn on" id="tabBreeding">配合ルート検索</button>
+  <button type="button" class="view-tab-btn" id="tabCombos">総当り配合</button>
   <button type="button" class="view-tab-btn" id="tabPaldex">パル図鑑</button>
 </div>
 
@@ -645,6 +667,22 @@
       <label class="paldex-owned-only-label"><input type="checkbox" id="paldexOwnedOnly"> 持っているパルだけ表示</label>
     </div>
     <div id="paldexList"></div>
+  </div>
+</div>
+
+<div id="combosView" style="display:none;">
+  <div class="card">
+    <h2>総当り配合(1回の配合で作れるパル)</h2>
+    <div class="hint" style="margin-bottom:12px;">持っているパルの中から親を1匹選ぶと、他の所持パル全員(自分自身との同種配合も含む)との組み合わせで生まれるパルを一覧表示します。</div>
+    <div class="row">
+      <input type="text" id="comboParentSearch" class="owned-search" placeholder="親にするパルを検索..." style="flex:1;">
+    </div>
+    <div class="owned-toggle-list" id="comboParentList" style="max-height:200px;"></div>
+    <div class="owned-count" id="comboParentSelected" style="margin-bottom:12px;">未選択</div>
+    <div class="row" style="margin-bottom: 12px;">
+      <label class="paldex-owned-only-label"><input type="checkbox" id="comboNewOnly"> 持っていないパルだけ表示</label>
+    </div>
+    <div id="comboResults"></div>
   </div>
 </div>
 
