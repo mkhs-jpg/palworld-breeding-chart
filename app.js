@@ -145,9 +145,23 @@ function savePinned() {
 }
 
 // ピン留め状態を切り替え、③選択リストと結果カルーセルの両方を最新化する。
+// ピン留めした瞬間は、いま画面に表示されているルートをそのままキャッシュへ引き継ぐ。
+// これが無いと、「あるモードで計算→モード切替(履歴はスナップショット表示のまま)→ピン留め」の
+// 手順で、ピン留めスライドが現在のモードで新規計算され、同じパルの履歴スライドと入れ替わる形で
+// 表示中のルートが突然変わってしまう(2026-07に実際に報告されたバグの根本原因)。
 function togglePinned(id) {
   const idx = pinnedIds.indexOf(id);
-  if (idx === -1) pinnedIds.push(id); else pinnedIds.splice(idx, 1);
+  if (idx === -1) {
+    pinnedIds.push(id);
+    const displayed = lastSlides.find(s => s.targetPal && s.targetPal.id === id && s.route);
+    if (displayed) {
+      const targetPal = PALS.find(p => p.id === id);
+      if (targetPal) pinnedRouteCache.set(id, { signature: computeRouteSignature(targetPal), route: displayed.route });
+    }
+  } else {
+    pinnedIds.splice(idx, 1);
+    pinnedRouteCache.delete(id);
+  }
   savePinned();
   transientMessage = null;
   renderTargetSelect(document.getElementById("targetSearch").value);
