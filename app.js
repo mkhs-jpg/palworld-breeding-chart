@@ -26,6 +26,18 @@ let paldexOwnedOnly = false; // trueなら所持パルだけに絞り込む
 // 結果カルーセル(横スワイプ)の先頭に常に表示され続ける(計算履歴のように追い出されない)。
 let pinnedIds = [];
 
+// ピン留めルートの計算結果キャッシュ(palId -> {signature, route})。
+// renderCarousel()は他の操作(パル図鑑の並び替え等、本来ルート計算に無関係な操作)でも
+// 頻繁に呼ばれるため、①②③や探索方法や除外設定が実際に変わっていない限りは
+// 「何も操作していないのに結果が変わって見える」ことが絶対に起きないよう、
+// 直前と同じ条件(signature)なら再計算せずキャッシュした結果をそのまま使う。
+const pinnedRouteCache = new Map();
+function computeRouteSignature(targetPal) {
+  const ownedKey = [...ownedIds].sort((a, b) => a - b).join(",");
+  const excludedKey = [...excludedIds].sort((a, b) => a - b).join(",");
+  return `${targetPal.id}|${ownedKey}|${excludedKey}|${requiredPalId}|${routeMode}`;
+}
+
 // 「今は配合に使えない」として除外中のパルid(性別が合わない等、実機で判明した一時的な制約)。
 // localStorageに永続化し、以後の全ての計算(①②の変更、ピン留めのライブ再計算含む)で
 // 所持パルの候補から取り除かれる。①のチェック自体は外さない(所持していないことにはしない)。
@@ -674,13 +686,19 @@ function getCombinedSlides() {
   const pinnedSlides = pinnedIds
     .map(id => PALS.find(p => p.id === id))
     .filter(Boolean)
-    .map(targetPal => ({
-      targetPal,
-      route: computeRoute(targetPal, owned),
-      ownedIdSet: new Set(ownedIds),
-      requiredId: requiredPalId,
-      pinned: true
-    }));
+    .map(targetPal => {
+      const signature = computeRouteSignature(targetPal);
+      const cached = pinnedRouteCache.get(targetPal.id);
+      const route = (cached && cached.signature === signature) ? cached.route : computeRoute(targetPal, owned);
+      pinnedRouteCache.set(targetPal.id, { signature, route });
+      return {
+        targetPal,
+        route,
+        ownedIdSet: new Set(ownedIds),
+        requiredId: requiredPalId,
+        pinned: true
+      };
+    });
 
   const historySlides = resultHistory
     .filter(h => !pinnedSet.has(h.targetPal.id))
