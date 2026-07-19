@@ -1076,6 +1076,27 @@ function buildRouteText(targetPal, route, requiredId, ownedIdSet) {
     lines.push(`${i + 1}回目: ${s.parentA.name} × ${s.parentB.name} → ${s.child.name}${eggInfo}${usesRequired ? "(経由指定)" : ""}`);
   });
   if (requiredPal) lines.push(`※「経由指定」は「${requiredPal.name}」を実際に配合に使ったステップです。`);
+
+  const availableOwnedIds = ownedIdSet ? [...ownedIdSet].filter(id => !excludedIds.has(id)) : [];
+  let altCombos = availableOwnedIds.length > 0
+    ? findBreedingCombos(PALS, targetPal, availableOwnedIds, BREEDING_EXAMPLES)
+    : [];
+  if (requiredId != null) {
+    altCombos = altCombos.filter(c => c.parentA.id === requiredId || c.parentB.id === requiredId);
+  }
+  const lastStep = route.steps[route.steps.length - 1];
+  if (lastStep) {
+    altCombos = altCombos.filter(c => {
+      const sameAsMain = (c.parentA.id === lastStep.parentA.id && c.parentB.id === lastStep.parentB.id) ||
+                          (c.parentA.id === lastStep.parentB.id && c.parentB.id === lastStep.parentA.id);
+      return !sameAsMain;
+    });
+  }
+  if (altCombos.length > 0) {
+    lines.push(`所持パルだけで直接作れる他の組み合わせ(${altCombos.length}件):`);
+    altCombos.forEach(c => lines.push(`・${c.parentA.name} × ${c.parentB.name} → ${targetPal.name}`));
+  }
+
   return lines.join("\n");
 }
 
@@ -1235,6 +1256,42 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
     ? `<p class="hint" style="margin-top:6px;">※「経由指定」バッジは「${requiredPal.name}」を実際に配合に使ったステップです。</p>`
     : "";
 
+  // メインルートは(タイブレークがあっても)候補のうち1通りしか選ばないため、所持パルだけで
+  // 直接targetPalを作れる他の親ペア(性別違いの個体を用意したい場合等の代替候補)があれば別途列挙する。
+  const availableOwnedIds = ownedIdSet ? [...ownedIdSet].filter(id => !excludedIds.has(id)) : [];
+  let altCombos = availableOwnedIds.length > 0
+    ? findBreedingCombos(PALS, targetPal, availableOwnedIds, BREEDING_EXAMPLES)
+    : [];
+  // 経由必須パル指定時は、それを使わない組み合わせは条件を満たさないため候補から外す
+  if (requiredId != null) {
+    altCombos = altCombos.filter(c => c.parentA.id === requiredId || c.parentB.id === requiredId);
+  }
+  // メインルートの最終ステップと同じ親ペアは重複表示しない
+  const lastStep = route.steps[route.steps.length - 1];
+  if (lastStep) {
+    altCombos = altCombos.filter(c => {
+      const sameAsMain = (c.parentA.id === lastStep.parentA.id && c.parentB.id === lastStep.parentB.id) ||
+                          (c.parentA.id === lastStep.parentB.id && c.parentB.id === lastStep.parentA.id);
+      return !sameAsMain;
+    });
+  }
+
+  const altCombosHtml = altCombos.length > 0 ? `
+    <div class="alt-combos" style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
+      <p class="hint" style="margin-bottom:8px;">🔀 所持パルだけで「${targetPal.name}」を直接作れる他の組み合わせ(${altCombos.length}件):</p>
+      ${altCombos.map(c => `
+        <div class="route-step">
+          <div class="route-gen-badge">↔</div>
+          <div class="route-formula">
+            ${palTag(c.parentA)} ×
+            ${palTag(c.parentB)} →
+            ${palTag(targetPal)}
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  ` : "";
+
   const displayHatchHours = isHatchMode ? route.totalHatchHours : computeCriticalPathHours(route.steps, ownedIdSet || new Set());
   const summaryLine = `「${targetPal.name}」まで <strong>${route.steps.length}回の配合</strong>(孵化時間合計 目安 <strong>${formatHatchHours(displayHatchHours)}</strong>)で到達できます。`;
 
@@ -1254,6 +1311,7 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
       </div>
       <div>${stepsHtml}</div>
       ${requiredNote}
+      ${altCombosHtml}
     </div>
   `;
 }
