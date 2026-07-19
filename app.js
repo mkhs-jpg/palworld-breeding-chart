@@ -506,7 +506,8 @@ function renderOwnedToggleList(filterText = "") {
 }
 
 // ②(任意)必ず経由する所持パルの候補リスト。①で現在選ばれている所持パルだけを候補にする複数選択リスト
-// (指定した全員を経路のどこかで実際に配合の親として使ったルートだけを探すAND条件になる)。
+// (指定した中の少なくとも1匹を経路のどこかで実際に配合の親として使ったルートを探すOR条件。
+// 複数選んでも全員を使う必要はない)。
 function renderRequiredToggleList() {
   const list = document.getElementById("requiredToggleList");
   const owned = PALS.filter(p => ownedIds.has(p.id));
@@ -882,7 +883,8 @@ function setTargetSort(mode) {
 // ---------- 配合ルート計算 ----------
 
 // routeModeが"hatchtime"なら孵化時間最小のダイクストラ探索、そうでなければ従来の世代数ベースのBFSを使う。
-// requiredPalIdsが指定されていれば、どちらのモードでも「経由必須パル全員」を実際に使ったルートだけを探す。
+// requiredPalIdsが指定されていれば、どちらのモードでも「経由必須パルのうち少なくとも1匹」を
+// 実際に使ったルートだけを探す(複数指定しても全員を使う必要はない)。
 // excludedIdsに入っているパルは「今は配合に使えない(性別が合わない等)」として所持リストから一時的に除く。
 function computeRoute(targetPal, owned) {
   const availableOwned = owned.filter(p => !excludedIds.has(p.id));
@@ -1078,14 +1080,14 @@ function buildRouteText(targetPal, route, requiredIds, ownedIdSet) {
     const eggInfo = `(${EGG_SIZE_JA[s.child.eggSize] || "不明"})`;
     lines.push(`${i + 1}回目: ${s.parentA.name} × ${s.parentB.name} → ${s.child.name}${eggInfo}${usesRequired ? "(経由指定)" : ""}`);
   });
-  if (requiredPals.length > 0) lines.push(`※「経由指定」は「${requiredPals.map(p => p.name).join("、")}」を実際に配合に使ったステップです。`);
+  if (requiredPals.length > 0) lines.push(`※「経由指定」は、指定したパル(${requiredPals.map(p => p.name).join("、")})のうち実際に配合に使われたものがあるステップです(全員を使う必要はありません)。`);
 
   const availableOwnedIds = ownedIdSet ? [...ownedIdSet].filter(id => !excludedIds.has(id)) : [];
   let altCombos = availableOwnedIds.length > 0
     ? findBreedingCombos(PALS, targetPal, availableOwnedIds, BREEDING_EXAMPLES)
     : [];
   if (reqIds.length > 0) {
-    altCombos = altCombos.filter(c => reqIds.every(id => c.parentA.id === id || c.parentB.id === id));
+    altCombos = altCombos.filter(c => reqIds.some(id => c.parentA.id === id || c.parentB.id === id));
   }
   const lastStep = route.steps[route.steps.length - 1];
   if (lastStep) {
@@ -1257,7 +1259,7 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredIds, slideIndex, p
   }).join("");
 
   const requiredNote = requiredPals.length > 0
-    ? `<p class="hint" style="margin-top:6px;">※「経由指定」バッジは「${requiredPals.map(p => p.name).join("、")}」を実際に配合に使ったステップです。</p>`
+    ? `<p class="hint" style="margin-top:6px;">※「経由指定」バッジは、指定したパル(${requiredPals.map(p => p.name).join("、")})のうち実際に配合に使われたものがあるステップです(全員を使う必要はありません)。</p>`
     : "";
 
   // メインルートは(タイブレークがあっても)候補のうち1通りしか選ばないため、所持パルだけで
@@ -1266,10 +1268,9 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredIds, slideIndex, p
   let altCombos = availableOwnedIds.length > 0
     ? findBreedingCombos(PALS, targetPal, availableOwnedIds, BREEDING_EXAMPLES)
     : [];
-  // 経由必須パル指定時は、指定した全員をその1ステップの親2枠でまかなえる組み合わせだけを残す
-  // (3匹以上指定時は1ステップでは満たせないため必然的に0件になる)
+  // 経由必須パル指定時は、指定したパルのうち少なくとも1匹をその組み合わせの親として使うものだけを残す
   if (reqIds.length > 0) {
-    altCombos = altCombos.filter(c => reqIds.every(id => c.parentA.id === id || c.parentB.id === id));
+    altCombos = altCombos.filter(c => reqIds.some(id => c.parentA.id === id || c.parentB.id === id));
   }
   // メインルートの最終ステップと同じ親ペアは重複表示しない
   const lastStep = route.steps[route.steps.length - 1];
