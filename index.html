@@ -442,6 +442,27 @@
   .legend-owned { background: var(--status-good); }
   .legend-bred { background: var(--surface-sunken); border: 1px solid var(--border-strong); }
 
+  .alt-combos-summary {
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--ink-secondary);
+    line-height: 1.7;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    user-select: none;
+  }
+  .alt-combos-summary::-webkit-details-marker { display: none; }
+  .alt-combos-summary::before {
+    content: "▶";
+    font-size: 0.65em;
+    color: var(--ink-muted);
+    transition: transform 0.15s ease;
+  }
+  .alt-combos-details[open] .alt-combos-summary::before { transform: rotate(90deg); }
+  .alt-combos-body { margin-top: 8px; }
+
   .badge {
     display: inline-block;
     padding: 3px 10px;

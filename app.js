@@ -1278,17 +1278,21 @@ function buildSlideHtml(targetPal, route, ownedIdSet, requiredId, slideIndex, pi
 
   const altCombosHtml = altCombos.length > 0 ? `
     <div class="alt-combos" style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
-      <p class="hint" style="margin-bottom:8px;">🔀 所持パルだけで「${targetPal.name}」を直接作れる他の組み合わせ(${altCombos.length}件):</p>
-      ${altCombos.map(c => `
-        <div class="route-step">
-          <div class="route-gen-badge">↔</div>
-          <div class="route-formula">
-            ${palTag(c.parentA)} ×
-            ${palTag(c.parentB)} →
-            ${palTag(targetPal)}
-          </div>
+      <details class="alt-combos-details">
+        <summary class="alt-combos-summary">🔀 所持パルだけで「${targetPal.name}」を直接作れる他の組み合わせ(${altCombos.length}件)</summary>
+        <div class="alt-combos-body">
+          ${altCombos.map(c => `
+            <div class="route-step">
+              <div class="route-gen-badge">↔</div>
+              <div class="route-formula">
+                ${palTag(c.parentA)} ×
+                ${palTag(c.parentB)} →
+                ${palTag(targetPal)}
+              </div>
+            </div>
+          `).join("")}
         </div>
-      `).join("")}
+      </details>
     </div>
   ` : "";
 
