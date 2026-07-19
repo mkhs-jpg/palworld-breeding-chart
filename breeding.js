@@ -186,18 +186,25 @@ function findBreedingRoute(pals, targetPal, ownedPals, exampleMap = {}, maxGener
   return { found: false, generations: maxGenerations, steps: [], reason: "not-found-within-limit" };
 }
 
-// findBreedingRouteと同様だが、「requiredPalIdで指定した所持パルを、経路のどこかで実際に
-// 配合の親として使ったルート」だけを探す。単に持っているだけでは条件を満たさない。
+// findBreedingRouteと同様だが、「requiredPalIdsで指定した所持パル全員を、経路のどこかで実際に
+// 配合の親として使ったルート」だけを探す(AND条件、単に持っているだけでは条件を満たさない)。
+// requiredPalIdsが空配列の場合はfindBreedingRouteと完全に同じ挙動になる。
 //
-// 世代ごとの閉包集合を2色に分けて育てる:
-//   withoutIds: 経由必須パルをまだ親として使っていない系統で手に入るパル(初期値=手持ち全部。
-//               経由必須パル自身もここに留まり続け、何度でも他のパルとの組み合わせに使える)
-//   withIds:    経由必須パルを既に親として使った系統で手に入るパル(初期値=空)
-// without×without の結果は通常without行き、ただし片方が経由必須パル自身ならwithへ昇格。
-// with×(without∪with) の結果は常にwith行き(既に経由済みの系統なので)。
-// targetPalがwithIdsに現れた時点で確定・backtrackする。
-function findBreedingRouteVia(pals, targetPal, ownedPals, requiredPalId, exampleMap = {}, maxGenerations = 10) {
-  if (!ownedPals.some(p => p.id === requiredPalId)) {
+// 経由必須パルが1匹だけだった旧実装は「without色/with色」の2状態で管理していたが、
+// 複数匹に対応するため「経路の中でこれまでに経由必須パルとして使ったものの集合」を
+// ビットマスク(パルiごとに1ビット)として一般化する。全ビットが立った状態(fullMask)に
+// targetPalが到達した時点で全員を経由したとみなし確定する。
+// 世代ごとの閉包集合を「id + mask」の状態として育てる(obtainedByMask: mask -> Set<id>)。
+// マスクは配合するたびに「両親のmaskの論理和」+「その親自身が経由必須パルなら自分のビット」で
+// 単調に増加していくだけなので、負のコストが無いのと同様に無限ループの心配は無い。
+// findBreedingRouteと同様、同じ状態(id+mask)へ複数の親ペアから到達できる場合は
+// 配合回数の概算(stepsCost)が少ない方を選ぶ。
+function findBreedingRouteVia(pals, targetPal, ownedPals, requiredPalIds, exampleMap = {}, maxGenerations = 10) {
+  const reqIds = [...new Set(requiredPalIds || [])];
+  if (reqIds.length === 0) {
+    return findBreedingRoute(pals, targetPal, ownedPals, exampleMap, maxGenerations);
+  }
+  if (!reqIds.every(id => ownedPals.some(p => p.id === id))) {
     return { found: false, generations: 0, steps: [], reason: "required-pal-not-owned" };
   }
   if (ownedPals.some(p => p.id === targetPal.id)) {
@@ -207,127 +214,94 @@ function findBreedingRouteVia(pals, targetPal, ownedPals, requiredPalId, example
     return { found: false, generations: 0, steps: [], reason: "no-owned-pals" };
   }
 
-  // 同じパル(id)がwithout側/with側の両方に別々に存在しうる(例: 違う親同士を配合したら
-  // たまたま経由必須パルと同じ種が生まれた、等)ため、backtrackは id 単体ではなく
-  // 「id + どちらの色から来た参照か」で管理する。via側にも親それぞれの色を記録しておく。
-  // findBreedingRouteと同様、同じ世代内で複数の親ペアから同じ子が作れる場合は
-  // 配合回数の概算(stepsCost、色ごとに別管理)が少ない方を選ぶ。
-  const withoutIds = new Set(ownedPals.map(p => p.id));
-  const withIds = new Set();
-  const viaWithout = new Map(); // id -> { parentA, parentAColor, parentB, parentBColor, childPower, exact, isExample, cost }
-  const viaWith = new Map();
-  const stepsCostWithout = new Map(ownedPals.map(p => [p.id, 0]));
-  const stepsCostWith = new Map();
+  const bitOf = new Map(reqIds.map((id, i) => [id, 1 << i]));
+  const fullMask = (1 << reqIds.length) - 1;
+  const stateKey = (id, mask) => `${id}:${mask}`;
+
+  // obtainedByMask.get(mask) = そのmaskちょうどで到達可能なパルidの集合
+  const obtainedByMask = new Map([[0, new Set(ownedPals.map(p => p.id))]]);
+  const via = new Map(); // "id:mask" -> { parentA, parentAMask, parentB, parentBMask, childPower, exact, isExample, cost }
+  const stepsCost = new Map(ownedPals.map(p => [stateKey(p.id, 0), 0]));
 
   for (let gen = 1; gen <= maxGenerations; gen++) {
-    const withoutPool = [...withoutIds].map(id => pals.find(p => p.id === id));
-    const withPool = [...withIds].map(id => pals.find(p => p.id === id));
+    const pool = [];
+    for (const [mask, ids] of obtainedByMask) {
+      for (const id of ids) pool.push({ pal: pals.find(p => p.id === id), mask });
+    }
 
-    const newWithout = [];
-    const newWithoutParents = new Map();
-    const newWith = [];
-    const newWithParents = new Map();
-
-    const considerWithout = (child, entry, cost) => {
-      const existing = newWithoutParents.get(child.id);
-      if (!existing || cost < existing.cost) {
-        if (!existing) newWithout.push(child);
-        newWithoutParents.set(child.id, { ...entry, cost });
-      }
-    };
-    const considerWith = (child, entry, cost) => {
-      const existing = newWithParents.get(child.id);
-      if (!existing || cost < existing.cost) {
-        if (!existing) newWith.push(child);
-        newWithParents.set(child.id, { ...entry, cost });
-      }
+    const newByMask = new Map(); // mask -> Map(childId -> entry)
+    const consider = (childId, mask, entry) => {
+      const already = obtainedByMask.get(mask);
+      if (already && already.has(childId)) return; // このmaskでは既に到達済み
+      if (!newByMask.has(mask)) newByMask.set(mask, new Map());
+      const bucket = newByMask.get(mask);
+      const existing = bucket.get(childId);
+      if (!existing || entry.cost < existing.cost) bucket.set(childId, entry);
     };
 
-    // 1. without × without (両方とも"without"色)
-    for (let i = 0; i < withoutPool.length; i++) {
-      for (let j = i; j < withoutPool.length; j++) {
-        const a = withoutPool[i], b = withoutPool[j];
-        const { child, childPower, exact, isExample, unknown } = breedOnce(pals, a, b, exampleMap);
+    for (let i = 0; i < pool.length; i++) {
+      for (let j = i; j < pool.length; j++) {
+        const a = pool[i], b = pool[j];
+        const { child, childPower, exact, isExample, unknown } = breedOnce(pals, a.pal, b.pal, exampleMap);
         if (unknown) continue;
 
         // 経由必須パルを自分自身とだけ配合しても実質的には何も進んでいないので「使った」扱いにしない
-        // (同じ種を持ったままwith集合へ無意味に昇格させてしまうのを防ぐ)。
-        const usesRequired = (a.id === requiredPalId || b.id === requiredPalId) && a.id !== b.id;
-        const entry = { parentA: a, parentAColor: "without", parentB: b, parentBColor: "without", childPower, exact, isExample };
-        const cost = stepsCostWithout.get(a.id) + stepsCostWithout.get(b.id) + 1;
-        if (usesRequired) {
-          if (!withIds.has(child.id)) considerWith(child, entry, cost);
-        } else {
-          if (!withoutIds.has(child.id)) considerWithout(child, entry, cost);
+        let childMask = a.mask | b.mask;
+        if (a.pal.id !== b.pal.id) {
+          if (bitOf.has(a.pal.id)) childMask |= bitOf.get(a.pal.id);
+          if (bitOf.has(b.pal.id)) childMask |= bitOf.get(b.pal.id);
         }
+
+        const cost = stepsCost.get(stateKey(a.pal.id, a.mask)) + stepsCost.get(stateKey(b.pal.id, b.mask)) + 1;
+        consider(child.id, childMask, {
+          parentA: a.pal, parentAMask: a.mask,
+          parentB: b.pal, parentBMask: b.mask,
+          childPower, exact, isExample, cost
+        });
       }
     }
 
-    // 2a. with × without ("with"色 × "without"色、常にwith行き)
-    for (const a of withPool) {
-      for (const b of withoutPool) {
-        const { child, childPower, exact, isExample, unknown } = breedOnce(pals, a, b, exampleMap);
-        if (unknown) continue;
-        if (withIds.has(child.id)) continue;
-        const cost = stepsCostWith.get(a.id) + stepsCostWithout.get(b.id) + 1;
-        considerWith(child, { parentA: a, parentAColor: "with", parentB: b, parentBColor: "without", childPower, exact, isExample }, cost);
+    let anyNew = false;
+    for (const [mask, bucket] of newByMask) {
+      if (!obtainedByMask.has(mask)) obtainedByMask.set(mask, new Set());
+      const set = obtainedByMask.get(mask);
+      for (const [id, entry] of bucket) {
+        if (set.has(id)) continue;
+        set.add(id);
+        via.set(stateKey(id, mask), entry);
+        stepsCost.set(stateKey(id, mask), entry.cost);
+        anyNew = true;
       }
     }
 
-    // 2b. with × with (両方とも"with"色、常にwith行き)
-    for (let i = 0; i < withPool.length; i++) {
-      for (let j = i; j < withPool.length; j++) {
-        const a = withPool[i], b = withPool[j];
-        const { child, childPower, exact, isExample, unknown } = breedOnce(pals, a, b, exampleMap);
-        if (unknown) continue;
-        if (withIds.has(child.id)) continue;
-        const cost = stepsCostWith.get(a.id) + stepsCostWith.get(b.id) + 1;
-        considerWith(child, { parentA: a, parentAColor: "with", parentB: b, parentBColor: "with", childPower, exact, isExample }, cost);
-      }
-    }
-
-    for (const c of newWithout) {
-      withoutIds.add(c.id);
-      const best = newWithoutParents.get(c.id);
-      viaWithout.set(c.id, best);
-      stepsCostWithout.set(c.id, best.cost);
-    }
-    for (const c of newWith) {
-      withIds.add(c.id);
-      const best = newWithParents.get(c.id);
-      viaWith.set(c.id, best);
-      stepsCostWith.set(c.id, best.cost);
-    }
-
-    if (withIds.has(targetPal.id)) {
+    const fullMaskSet = obtainedByMask.get(fullMask);
+    if (fullMaskSet && fullMaskSet.has(targetPal.id)) {
       const steps = [];
       const visited = new Set();
 
-      function backtrack(id, color) {
-        const key = color + ":" + id;
+      function backtrack(id, mask) {
+        const key = stateKey(id, mask);
         if (visited.has(key)) return;
         visited.add(key);
-        const via = color === "with" ? viaWith.get(id) : viaWithout.get(id);
-        if (!via) return; // 手持ち初期パルはこの色ではステップなし(=もともと持っていた個体)
-        backtrack(via.parentA.id, via.parentAColor);
-        backtrack(via.parentB.id, via.parentBColor);
+        const v = via.get(key);
+        if (!v) return; // 手持ち初期パル(mask=0)はここで終端
+        backtrack(v.parentA.id, v.parentAMask);
+        backtrack(v.parentB.id, v.parentBMask);
         steps.push({
-          parentA: via.parentA,
-          parentB: via.parentB,
+          parentA: v.parentA,
+          parentB: v.parentB,
           child: pals.find(p => p.id === id),
-          childPower: via.childPower,
-          exact: via.exact,
-          isExample: via.isExample
+          childPower: v.childPower,
+          exact: v.exact,
+          isExample: v.isExample
         });
       }
-      backtrack(targetPal.id, "with");
+      backtrack(targetPal.id, fullMask);
 
       return { found: true, generations: gen, steps, reason: "bred-via" };
     }
 
-    if (newWithout.length === 0 && newWith.length === 0) {
-      break;
-    }
+    if (!anyNew) break;
   }
 
   return { found: false, generations: maxGenerations, steps: [], reason: "not-found-within-limit" };
@@ -374,13 +348,14 @@ function computeCriticalPathHours(steps, ownedIds) {
 // 定義し、これを状態ごとの最短コストとして確定させていく(コストに負値が無いためダイクストラ法が使える)。
 // タマゴサイズ(孵化時間)が不明なパルはgetHatchHoursが安全側の値を返すため、経路から除外されることはない。
 //
-// requiredPalIdを指定した場合はfindBreedingRouteViaと同様、状態を「経由必須パルを実際に配合の親として
-// 使ったか(color: "with"/"without")」で2色に分けて管理し、それぞれ独立に最短コストを求める。
-// requiredPalIdが未指定の場合は常に"without"色のみを使う(色の区別を実質無視する)。
+// requiredPalIdsを指定した場合はfindBreedingRouteViaと同様、状態を「これまでに経由必須パルとして
+// 実際に配合の親として使ったものの集合」をビットマスクとして持ち、それぞれ独立に最短コストを求める。
+// requiredPalIdsが未指定/空の場合はfullMask=0のみを使う(マスクの区別を実質無視する)。
 //
 // 戻り値: { found, totalHatchHours, steps: [{parentA, parentB, child, hatchHours, exact, isExample}], reason }
-function findBreedingRouteMinHatchTime(pals, targetPal, ownedPals, exampleMap = {}, requiredPalId = null) {
-  if (requiredPalId != null && !ownedPals.some(p => p.id === requiredPalId)) {
+function findBreedingRouteMinHatchTime(pals, targetPal, ownedPals, exampleMap = {}, requiredPalIds = null) {
+  const reqIds = [...new Set(requiredPalIds || [])];
+  if (reqIds.length > 0 && !reqIds.every(id => ownedPals.some(p => p.id === id))) {
     return { found: false, totalHatchHours: 0, steps: [], reason: "required-pal-not-owned" };
   }
   if (ownedPals.some(p => p.id === targetPal.id)) {
@@ -390,9 +365,14 @@ function findBreedingRouteMinHatchTime(pals, targetPal, ownedPals, exampleMap = 
     return { found: false, totalHatchHours: 0, steps: [], reason: "no-owned-pals" };
   }
 
-  const key = (id, color) => `${id}:${color}`;
-  const dist = new Map(); // "id:color" -> 現時点で判明している最短の合計孵化時間(時間)
-  const via = new Map(); // "id:color" -> {parentAKey, parentBKey, parentA, parentB, child, hatchHours, exact, isExample}
+  // 経路のどこまで経由必須パルを使ったかを、findBreedingRouteVia同様ビットマスクで管理する
+  // (reqIds未指定時はfullMask=0で、この分岐は実質何もしない=常時"0"状態のみを使う)。
+  const bitOf = new Map(reqIds.map((id, i) => [id, 1 << i]));
+  const fullMask = reqIds.length > 0 ? (1 << reqIds.length) - 1 : 0;
+
+  const key = (id, mask) => `${id}:${mask}`;
+  const dist = new Map(); // "id:mask" -> 現時点で判明している最短の合計孵化時間(時間)
+  const via = new Map(); // "id:mask" -> {parentAKey, parentBKey, parentA, parentB, child, hatchHours, exact, isExample}
   const finalized = new Set();
 
   // lazy-deletion方式の単純な二分ヒープ(状態数は最大 パル数×2 程度なので十分高速)
@@ -428,14 +408,14 @@ function findBreedingRouteMinHatchTime(pals, targetPal, ownedPals, exampleMap = 
   }
 
   for (const p of ownedPals) {
-    const k = key(p.id, "without");
+    const k = key(p.id, 0);
     if (!dist.has(k)) {
       dist.set(k, 0);
       heapPush(0, k);
     }
   }
 
-  const targetKeyGoal = key(targetPal.id, requiredPalId != null ? "with" : "without");
+  const targetKeyGoal = key(targetPal.id, fullMask);
   let found = false;
 
   while (heap.length > 0) {
@@ -447,13 +427,13 @@ function findBreedingRouteMinHatchTime(pals, targetPal, ownedPals, exampleMap = 
 
     const sep = uKey.lastIndexOf(":");
     const uId = Number(uKey.slice(0, sep));
-    const uColor = uKey.slice(sep + 1);
+    const uMask = Number(uKey.slice(sep + 1));
     const uPal = pals.find(p => p.id === uId);
 
     for (const vKey of finalized) {
       const vSep = vKey.lastIndexOf(":");
       const vId = Number(vKey.slice(0, vSep));
-      const vColor = vKey.slice(vSep + 1);
+      const vMask = Number(vKey.slice(vSep + 1));
       const vPal = pals.find(p => p.id === vId);
       const vDist = dist.get(vKey);
 
@@ -461,10 +441,13 @@ function findBreedingRouteMinHatchTime(pals, targetPal, ownedPals, exampleMap = 
       if (unknown) continue;
       const hatchHours = getHatchHours(child);
 
-      const usesRequired = requiredPalId != null && (uPal.id === requiredPalId || vPal.id === requiredPalId) && uPal.id !== vPal.id;
-      const childColor = (uColor === "with" || vColor === "with" || usesRequired) ? "with" : "without";
+      let childMask = uMask | vMask;
+      if (uPal.id !== vPal.id) {
+        if (bitOf.has(uPal.id)) childMask |= bitOf.get(uPal.id);
+        if (bitOf.has(vPal.id)) childMask |= bitOf.get(vPal.id);
+      }
       const newCost = Math.max(d, vDist) + hatchHours;
-      const childKey = key(child.id, childColor);
+      const childKey = key(child.id, childMask);
       const cur = dist.has(childKey) ? dist.get(childKey) : Infinity;
       if (newCost < cur) {
         dist.set(childKey, newCost);
@@ -502,7 +485,7 @@ function findBreedingRouteMinHatchTime(pals, targetPal, ownedPals, exampleMap = 
     found: true,
     totalHatchHours: dist.get(targetKeyGoal),
     steps,
-    reason: requiredPalId != null ? "bred-via-min-hatch" : "bred-min-hatch"
+    reason: reqIds.length > 0 ? "bred-via-min-hatch" : "bred-min-hatch"
   };
 }
 
