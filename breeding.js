@@ -339,6 +339,124 @@ function findBreedingRouteVia(pals, targetPal, ownedPals, requiredPalIds, exampl
   return { found: false, generations: maxGenerations, steps: [], reason: "not-found-within-limit" };
 }
 
+// findBreedingRouteViaのAND版。「requiredPalIdsで指定した所持パル全員を、経路のどこかで実際に
+// 配合の親として使ったルート」だけを探す(スキル継承タブ専用。②本体のOR条件とは別に、
+// 「候補全員を使うルート」と「どれか1匹を使うルート」の両方をユーザーに見せたい場合に使う)。
+// requiredPalIdsが空配列の場合はfindBreedingRouteと完全に同じ挙動になる。
+//
+// OR版(findBreedingRouteVia)の「使ったか(with)/未使用か(without)」の2状態では「誰を使ったか」を
+// 区別できないため、パルiごとに1ビットを割り当てたビットマスクで「これまでに経由必須パルとして
+// 実際に使ったものの集合」を管理し、全ビットが立った状態(fullMask)にtargetPalが到達した時点で
+// 全員を経由したとみなし確定する(マスクは配合するたびに単調に増加していくだけなので、
+// 負のコストが無いのと同様に無限ループの心配は無い)。
+function findBreedingRouteViaAll(pals, targetPal, ownedPals, requiredPalIds, exampleMap = {}, maxGenerations = 10) {
+  const reqIds = [...new Set(requiredPalIds || [])];
+  if (reqIds.length === 0) {
+    return findBreedingRoute(pals, targetPal, ownedPals, exampleMap, maxGenerations);
+  }
+  if (!reqIds.every(id => ownedPals.some(p => p.id === id))) {
+    return { found: false, generations: 0, steps: [], reason: "required-pal-not-owned" };
+  }
+  if (ownedPals.some(p => p.id === targetPal.id)) {
+    return { found: true, generations: 0, steps: [], reason: "already-owned" };
+  }
+  if (ownedPals.length === 0) {
+    return { found: false, generations: 0, steps: [], reason: "no-owned-pals" };
+  }
+
+  const bitOf = new Map(reqIds.map((id, i) => [id, 1 << i]));
+  const fullMask = (1 << reqIds.length) - 1;
+  const stateKey = (id, mask) => `${id}:${mask}`;
+
+  // obtainedByMask.get(mask) = そのmaskちょうどで到達可能なパルidの集合
+  const obtainedByMask = new Map([[0, new Set(ownedPals.map(p => p.id))]]);
+  const via = new Map(); // "id:mask" -> { parentA, parentAMask, parentB, parentBMask, childPower, exact, isExample, cost }
+  const stepsCost = new Map(ownedPals.map(p => [stateKey(p.id, 0), 0]));
+
+  for (let gen = 1; gen <= maxGenerations; gen++) {
+    const pool = [];
+    for (const [mask, ids] of obtainedByMask) {
+      for (const id of ids) pool.push({ pal: pals.find(p => p.id === id), mask });
+    }
+
+    const newByMask = new Map(); // mask -> Map(childId -> entry)
+    const consider = (childId, mask, entry) => {
+      const already = obtainedByMask.get(mask);
+      if (already && already.has(childId)) return; // このmaskでは既に到達済み
+      if (!newByMask.has(mask)) newByMask.set(mask, new Map());
+      const bucket = newByMask.get(mask);
+      const existing = bucket.get(childId);
+      if (!existing || entry.cost < existing.cost) bucket.set(childId, entry);
+    };
+
+    for (let i = 0; i < pool.length; i++) {
+      for (let j = i; j < pool.length; j++) {
+        const a = pool[i], b = pool[j];
+        const { child, childPower, exact, isExample, unknown } = breedOnce(pals, a.pal, b.pal, exampleMap);
+        if (unknown) continue;
+
+        // 経由必須パルを自分自身とだけ配合しても実質的には何も進んでいないので「使った」扱いにしない
+        let childMask = a.mask | b.mask;
+        if (a.pal.id !== b.pal.id) {
+          if (bitOf.has(a.pal.id)) childMask |= bitOf.get(a.pal.id);
+          if (bitOf.has(b.pal.id)) childMask |= bitOf.get(b.pal.id);
+        }
+
+        const cost = stepsCost.get(stateKey(a.pal.id, a.mask)) + stepsCost.get(stateKey(b.pal.id, b.mask)) + 1;
+        consider(child.id, childMask, {
+          parentA: a.pal, parentAMask: a.mask,
+          parentB: b.pal, parentBMask: b.mask,
+          childPower, exact, isExample, cost
+        });
+      }
+    }
+
+    let anyNew = false;
+    for (const [mask, bucket] of newByMask) {
+      if (!obtainedByMask.has(mask)) obtainedByMask.set(mask, new Set());
+      const set = obtainedByMask.get(mask);
+      for (const [id, entry] of bucket) {
+        if (set.has(id)) continue;
+        set.add(id);
+        via.set(stateKey(id, mask), entry);
+        stepsCost.set(stateKey(id, mask), entry.cost);
+        anyNew = true;
+      }
+    }
+
+    const fullMaskSet = obtainedByMask.get(fullMask);
+    if (fullMaskSet && fullMaskSet.has(targetPal.id)) {
+      const steps = [];
+      const visited = new Set();
+
+      function backtrack(id, mask) {
+        const key = stateKey(id, mask);
+        if (visited.has(key)) return;
+        visited.add(key);
+        const v = via.get(key);
+        if (!v) return; // 手持ち初期パル(mask=0)はここで終端
+        backtrack(v.parentA.id, v.parentAMask);
+        backtrack(v.parentB.id, v.parentBMask);
+        steps.push({
+          parentA: v.parentA,
+          parentB: v.parentB,
+          child: pals.find(p => p.id === id),
+          childPower: v.childPower,
+          exact: v.exact,
+          isExample: v.isExample
+        });
+      }
+      backtrack(targetPal.id, fullMask);
+
+      return { found: true, generations: gen, steps, reason: "bred-via-all" };
+    }
+
+    if (!anyNew) break;
+  }
+
+  return { found: false, generations: maxGenerations, steps: [], reason: "not-found-within-limit" };
+}
+
 // タマゴサイズ別の孵化時間の目安(時間)。ユーザーのワールド設定に合わせた値。
 // 基準値(palworld.wiki.gg「Egg Incubator」記事、適温でない場合): Normal=6h, Large=36h, Huge=72h。
 // ユーザー環境ではHugeの実測値が2h(基準値の1/36)だったため、ワールド設定の孵化速度倍率が
@@ -514,9 +632,147 @@ function findBreedingRouteMinHatchTime(pals, targetPal, ownedPals, exampleMap = 
   };
 }
 
+// findBreedingRouteMinHatchTimeのAND版(findBreedingRouteViaAllの孵化時間最小モード版)。
+// 「requiredPalIds全員を実際に配合の親として使ったルート」の中で孵化時間合計が最小になるものを
+// ダイクストラ法で探す。findBreedingRouteViaAllと同様、状態をビットマスクで管理する
+// (findBreedingRouteMinHatchTimeの"with"/"without"2色を、複数ビットに一般化したもの)。
+function findBreedingRouteMinHatchTimeAll(pals, targetPal, ownedPals, exampleMap = {}, requiredPalIds = null) {
+  const reqIds = [...new Set(requiredPalIds || [])];
+  if (reqIds.length > 0 && !reqIds.every(id => ownedPals.some(p => p.id === id))) {
+    return { found: false, totalHatchHours: 0, steps: [], reason: "required-pal-not-owned" };
+  }
+  if (ownedPals.some(p => p.id === targetPal.id)) {
+    return { found: true, totalHatchHours: 0, steps: [], reason: "already-owned" };
+  }
+  if (ownedPals.length === 0) {
+    return { found: false, totalHatchHours: 0, steps: [], reason: "no-owned-pals" };
+  }
+
+  const bitOf = new Map(reqIds.map((id, i) => [id, 1 << i]));
+  const fullMask = reqIds.length > 0 ? (1 << reqIds.length) - 1 : 0;
+
+  const key = (id, mask) => `${id}:${mask}`;
+  const dist = new Map();
+  const via = new Map();
+  const finalized = new Set();
+
+  const heap = [];
+  function heapPush(d, k) {
+    heap.push([d, k]);
+    let i = heap.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (heap[p][0] <= heap[i][0]) break;
+      [heap[p], heap[i]] = [heap[i], heap[p]];
+      i = p;
+    }
+  }
+  function heapPop() {
+    if (heap.length === 0) return null;
+    const top = heap[0];
+    const last = heap.pop();
+    if (heap.length > 0) {
+      heap[0] = last;
+      let i = 0;
+      while (true) {
+        const l = i * 2 + 1, r = i * 2 + 2;
+        let smallest = i;
+        if (l < heap.length && heap[l][0] < heap[smallest][0]) smallest = l;
+        if (r < heap.length && heap[r][0] < heap[smallest][0]) smallest = r;
+        if (smallest === i) break;
+        [heap[smallest], heap[i]] = [heap[i], heap[smallest]];
+        i = smallest;
+      }
+    }
+    return top;
+  }
+
+  for (const p of ownedPals) {
+    const k = key(p.id, 0);
+    if (!dist.has(k)) {
+      dist.set(k, 0);
+      heapPush(0, k);
+    }
+  }
+
+  const targetKeyGoal = key(targetPal.id, fullMask);
+  let found = false;
+
+  while (heap.length > 0) {
+    const [d, uKey] = heapPop();
+    if (finalized.has(uKey)) continue;
+    if (d > dist.get(uKey)) continue;
+    finalized.add(uKey);
+    if (uKey === targetKeyGoal) { found = true; break; }
+
+    const sep = uKey.lastIndexOf(":");
+    const uId = Number(uKey.slice(0, sep));
+    const uMask = Number(uKey.slice(sep + 1));
+    const uPal = pals.find(p => p.id === uId);
+
+    for (const vKey of finalized) {
+      const vSep = vKey.lastIndexOf(":");
+      const vId = Number(vKey.slice(0, vSep));
+      const vMask = Number(vKey.slice(vSep + 1));
+      const vPal = pals.find(p => p.id === vId);
+      const vDist = dist.get(vKey);
+
+      const { child, exact, isExample, unknown } = breedOnce(pals, uPal, vPal, exampleMap);
+      if (unknown) continue;
+      const hatchHours = getHatchHours(child);
+
+      let childMask = uMask | vMask;
+      if (uPal.id !== vPal.id) {
+        if (bitOf.has(uPal.id)) childMask |= bitOf.get(uPal.id);
+        if (bitOf.has(vPal.id)) childMask |= bitOf.get(vPal.id);
+      }
+      const newCost = Math.max(d, vDist) + hatchHours;
+      const childKey = key(child.id, childMask);
+      const cur = dist.has(childKey) ? dist.get(childKey) : Infinity;
+      if (newCost < cur) {
+        dist.set(childKey, newCost);
+        via.set(childKey, { parentAKey: uKey, parentBKey: vKey, parentA: uPal, parentB: vPal, child, hatchHours, exact, isExample });
+        heapPush(newCost, childKey);
+      }
+    }
+  }
+
+  if (!found) {
+    return { found: false, totalHatchHours: 0, steps: [], reason: "not-found" };
+  }
+
+  const steps = [];
+  const visited = new Set();
+  function backtrack(k) {
+    if (visited.has(k)) return;
+    visited.add(k);
+    const v = via.get(k);
+    if (!v) return;
+    backtrack(v.parentAKey);
+    backtrack(v.parentBKey);
+    steps.push({
+      parentA: v.parentA,
+      parentB: v.parentB,
+      child: v.child,
+      hatchHours: v.hatchHours,
+      exact: v.exact,
+      isExample: v.isExample
+    });
+  }
+  backtrack(targetKeyGoal);
+
+  return {
+    found: true,
+    totalHatchHours: dist.get(targetKeyGoal),
+    steps,
+    reason: reqIds.length > 0 ? "bred-via-all-min-hatch" : "bred-min-hatch"
+  };
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     computeChildPower, findClosestPals, breedOnce, findBreedingCombos, findBreedingRoute, findBreedingRouteVia,
-    EGG_HATCH_HOURS, getHatchHours, findBreedingRouteMinHatchTime, computeCriticalPathHours
+    findBreedingRouteViaAll, EGG_HATCH_HOURS, getHatchHours, findBreedingRouteMinHatchTime,
+    findBreedingRouteMinHatchTimeAll, computeCriticalPathHours
   };
 }

@@ -946,8 +946,10 @@ function updateSkillTargetSelected() {
   }
 }
 
-// このスキルを持つ所持パル(候補)を②(requiredPalIds、OR条件)にセットして配合ルート検索タブへ切り替え、
-// 通常のcalcRoute()で計算する(結果表示・ピン留め・代替組み合わせ等は既存の仕組みをそのまま使う)。
+// このスキルを持つ所持パル(候補)について、「候補のうち少なくとも1匹を使うルート」と
+// 「候補全員を実際に使うルート」の2つを計算しスキル継承タブ内に並べて表示する。
+// あわせて②(requiredPalIds)にも候補を反映し、配合ルート検索タブ側とも状態を同期させておく
+// (そちらでピン留め等のフル機能付きで見たい場合にすぐ使えるように)。
 function calcSkillRoute() {
   const hint = document.getElementById("skillCalcHint");
   if (selectedSkillId == null) {
@@ -966,10 +968,82 @@ function calcSkillRoute() {
     return;
   }
   hint.textContent = "";
+
   requiredPalIds = candidateIds;
   renderRequiredToggleList();
-  switchView("breeding");
-  calcRoute();
+
+  const targetPal = PALS.find(p => p.id === selectedTargetId);
+  const owned = PALS.filter(p => ownedIds.has(p.id));
+  const availableOwned = owned.filter(p => !excludedIds.has(p.id));
+
+  const routeAny = computeRoute(targetPal, owned); // 既存のOR条件(グローバルrequiredPalIds/routeModeに従う)
+  const routeAll = routeMode === "hatchtime"
+    ? findBreedingRouteMinHatchTimeAll(PALS, targetPal, availableOwned, BREEDING_EXAMPLES, candidateIds)
+    : findBreedingRouteViaAll(PALS, targetPal, availableOwned, candidateIds, BREEDING_EXAMPLES, 10);
+
+  renderSkillRouteResults(targetPal, routeAny, routeAll, candidateIds, new Set(ownedIds));
+}
+
+// スキル継承タブ内に「どれか1匹を使うルート」「全員を使うルート」の2枚を並べて表示する。
+// 配合ルート検索タブのカルーセル(ピン留め・除外・代替組み合わせ等)とは独立した読み取り専用表示。
+function renderSkillRouteResults(targetPal, routeAny, routeAll, requiredIds, ownedIdSet) {
+  const box = document.getElementById("skillRouteResults");
+  box.innerHTML =
+    buildSkillRouteCard("候補のうち少なくとも1匹を使うルート", targetPal, routeAny, ownedIdSet, requiredIds) +
+    buildSkillRouteCard("候補全員を実際に使うルート", targetPal, routeAll, ownedIdSet, requiredIds);
+}
+
+function buildSkillRouteCard(label, targetPal, route, ownedIdSet, requiredIds) {
+  if (route.reason === "already-owned") {
+    return `<div class="card"><h2>${label}</h2><p class="hint">「${targetPal.name}」はすでに持っているパルの中にあります。</p></div>`;
+  }
+  if (route.reason === "required-pal-not-owned" || route.reason === "no-owned-pals") {
+    return `<div class="card"><h2>${label}</h2><p class="hint">候補パルが所持リストから外れています。②を選び直してください。</p></div>`;
+  }
+
+  const isHatchMode = route.totalHatchHours !== undefined;
+  if (!route.found) {
+    const limitNote = isHatchMode ? "" : "10世代以内に";
+    return `<div class="card"><h2>${label}</h2><p class="hint">${limitNote}「${targetPal.name}」へ到達できませんでした。</p></div>`;
+  }
+
+  const palColorMap = buildPalColorMap(route.steps);
+  const palTag = (pal) => {
+    const isOwned = ownedIdSet.has(pal.id);
+    const ownedClass = isOwned ? "pal-tag-owned" : "pal-tag-bred";
+    const color = !isOwned ? palColorMap.get(pal.id) : null;
+    const colorStyle = color ? ` style="border-color:${color}; color:${color};"` : "";
+    const icon = `<img class="pal-tag-icon" src="images/pal-${pal.paldexId.toLowerCase()}.png" alt="" loading="lazy" onerror="this.style.display='none'">`;
+    return `<span class="pal-tag ${ownedClass}"${colorStyle} data-pal-id="${pal.id}">${icon}${pal.name}</span>`;
+  };
+
+  const stepsHtml = route.steps.map((s, i) => {
+    const usesRequired = requiredIds.some(id => s.parentA.id === id || s.parentB.id === id);
+    const eggBadge = `<span class="egg-size-badge egg-size-${(s.child.eggSize || "unknown").toLowerCase()}">🥚 ${EGG_SIZE_JA[s.child.eggSize] || "不明"}</span>`;
+    return `
+      <div class="route-step">
+        <div class="route-gen-badge">${i + 1}</div>
+        <div class="route-formula">
+          ${palTag(s.parentA)} ×
+          ${palTag(s.parentB)} →
+          ${palTag(s.child)}
+          ${eggBadge}
+          ${usesRequired ? '<span class="badge required">候補使用</span>' : ""}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  const displayHatchHours = isHatchMode ? route.totalHatchHours : computeCriticalPathHours(route.steps, ownedIdSet);
+  const summaryLine = `「${targetPal.name}」まで <strong>${route.steps.length}回の配合</strong>(孵化時間合計 目安 <strong>${formatHatchHours(displayHatchHours)}</strong>)で到達できます。`;
+
+  return `
+    <div class="card">
+      <h2>${label}</h2>
+      <p class="result-summary">${summaryLine}</p>
+      <div>${stepsHtml}</div>
+    </div>
+  `;
 }
 
 function bindEvents() {

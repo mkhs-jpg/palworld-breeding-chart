@@ -712,7 +712,7 @@
 
 <div class="card">
   <h2>①スキルを選ぶ</h2>
-  <div class="hint" style="margin-bottom:12px;">継承したいパッシブスキルを選ぶと、そのスキルを持たせている所持パルにチェックを付けられます。継承するスキルを持ったパルが複数いる場合、経路の中で少なくとも1匹が実際に配合の親として使われるルートを計算します(全員を使う必要はありません)。</div>
+  <div class="hint" style="margin-bottom:12px;">継承したいパッシブスキルを選ぶと、そのスキルを持たせている所持パルにチェックを付けられます。継承するスキルを持ったパルが複数いる場合、「候補のうち少なくとも1匹を使うルート」と「候補全員を実際に使うルート」の2つを計算して見比べられます。</div>
   <div class="row">
     <input type="text" id="skillSearch" class="owned-search" placeholder="スキル名や効果で検索..." style="flex:1;">
   </div>
@@ -741,9 +741,11 @@
   <div class="owned-count" id="skillTargetSelected" style="margin-bottom:12px;">未選択</div>
   <div class="hint" id="skillCalcHint" style="margin-bottom:8px;"></div>
   <div class="row">
-    <button id="btnSkillCalc" style="width: 100%; padding: 14px; font-size: 1.05rem;">スキル継承ルートを計算する(配合ルート検索タブに表示)</button>
+    <button id="btnSkillCalc" style="width: 100%; padding: 14px; font-size: 1.05rem;">スキル継承ルートを計算する</button>
   </div>
 </div>
+
+<div id="skillRouteResults"></div>
 
 </div>
 
