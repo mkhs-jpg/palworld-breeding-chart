@@ -592,6 +592,7 @@
 <div class="view-tabs">
   <button type="button" class="view-tab-btn on" id="tabBreeding">配合ルート検索</button>
   <button type="button" class="view-tab-btn" id="tabCombos">総当り配合</button>
+  <button type="button" class="view-tab-btn" id="tabSkills">スキル継承</button>
   <button type="button" class="view-tab-btn" id="tabPaldex">パル図鑑</button>
 </div>
 
@@ -705,6 +706,45 @@
     </div>
     <div id="comboResults"></div>
   </div>
+</div>
+
+<div id="skillsView" style="display:none;">
+
+<div class="card">
+  <h2>①スキルを選ぶ</h2>
+  <div class="hint" style="margin-bottom:12px;">継承したいパッシブスキルを選ぶと、そのスキルを持たせている所持パルにチェックを付けられます。継承するスキルを持ったパルが複数いる場合、経路の中で少なくとも1匹が実際に配合の親として使われるルートを計算します(全員を使う必要はありません)。</div>
+  <div class="row">
+    <input type="text" id="skillSearch" class="owned-search" placeholder="スキル名や効果で検索..." style="flex:1;">
+  </div>
+  <div class="owned-toggle-list" id="skillToggleList" style="max-height:200px;"></div>
+  <div class="owned-count" id="skillSelected">未選択</div>
+</div>
+
+<div class="card" id="skillPalTaggingCard" style="display:none;">
+  <h2>②このスキルを持たせている所持パルを選ぶ</h2>
+  <div class="hint" style="margin-bottom:12px;">チェックした所持パルは、以後このスキルの継承候補としてブラウザに保存されます。①で持っているパルだけが候補になります。</div>
+  <div class="owned-toggle-list" id="skillPalTagList" style="max-height:200px;"></div>
+  <div class="owned-count" id="skillPalTagCount">0匹</div>
+</div>
+
+<div class="card">
+  <h2>③作りたいパルを選択</h2>
+  <div class="row">
+    <input type="text" id="skillTargetSearch" class="owned-search" placeholder="作りたいパル名で検索..." style="flex:1;">
+  </div>
+  <div class="row" style="margin-bottom: 12px;">
+    <span class="hint">並び順:</span>
+    <button type="button" class="sort-toggle-btn on" id="skillTargetSortAiueo" data-sort="aiueo">あいうえお順</button>
+    <button type="button" class="sort-toggle-btn" id="skillTargetSortNo" data-sort="no">図鑑No順</button>
+  </div>
+  <div class="owned-toggle-list" id="skillTargetToggleList" style="max-height:200px;"></div>
+  <div class="owned-count" id="skillTargetSelected" style="margin-bottom:12px;">未選択</div>
+  <div class="hint" id="skillCalcHint" style="margin-bottom:8px;"></div>
+  <div class="row">
+    <button id="btnSkillCalc" style="width: 100%; padding: 14px; font-size: 1.05rem;">スキル継承ルートを計算する(配合ルート検索タブに表示)</button>
+  </div>
+</div>
+
 </div>
 
 <div class="card">
