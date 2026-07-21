@@ -110,6 +110,7 @@ function init() {
     loadPalSkills();
     renderTargetSelect();
     renderSkillTargetToggleList();
+    renderSkillTagFilterRow();
     renderSkillToggleList();
     renderOwnedToggleList();
     renderRequiredToggleList();
@@ -826,18 +827,51 @@ function renderComboResults() {
 // スキルのcategoryキー→日本語見出し。SKILLSのcategoryフィールド(work/combat)に対応する。
 const SKILL_CATEGORY_JA = { work: "作業系", combat: "戦闘系" };
 
+// スキルのtagsキー→日本語ラベル。skills-data.jsonのtagsフィールド(effect文字列から機械的に導出)に対応する。
+const SKILL_TAG_JA = {
+  moveSpeed: "移動速度", workSpeed: "作業速度", attack: "攻撃力", defense: "防御力",
+  elementalDamage: "属性ダメージ", hunger: "満腹度", sanity: "SAN値", stamina: "スタミナ",
+  tradePrice: "取引価格", cooldown: "クールタイム", eggTime: "孵化時間短縮", other: "その他"
+};
+
+// タグによる絞り込み(複数選択可、OR条件。選んだタグのいずれかを持つスキルだけを表示する。
+// 未選択なら絞り込みなし)。①のスキル一覧に検索と組み合わせて適用する。
+let skillTagFilters = new Set();
+
+function renderSkillTagFilterRow() {
+  const row = document.getElementById("skillTagFilterRow");
+  const tags = [...new Set(SKILLS.flatMap(s => s.tags || []))]
+    .sort((a, b) => (SKILL_TAG_JA[a] || a).localeCompare(SKILL_TAG_JA[b] || b, "ja"));
+
+  row.innerHTML = `<span class="hint">絞り込み:</span>` + tags.map(t => `
+    <button type="button" class="sort-toggle-btn ${skillTagFilters.has(t) ? "on" : ""}" data-tag="${t}">${SKILL_TAG_JA[t] || t}</button>
+  `).join("");
+
+  row.querySelectorAll("[data-tag]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const tag = btn.dataset.tag;
+      if (skillTagFilters.has(tag)) skillTagFilters.delete(tag); else skillTagFilters.add(tag);
+      btn.classList.toggle("on", skillTagFilters.has(tag));
+      renderSkillToggleList(document.getElementById("skillSearch").value);
+    });
+  });
+}
+
 // ①スキルを選ぶ。複数選択可(継承したいスキルが複数ある場合に対応)。
-// 作業系/戦闘系のカテゴリ見出しで種類ごとにグループ分けして表示する。
+// 作業系/戦闘系のカテゴリ見出しで種類ごとにグループ分けして表示し、タグ絞り込み(skillTagFilters)も適用する。
 function renderSkillToggleList(filterText = "") {
   const list = document.getElementById("skillToggleList");
   let filtered = SKILLS;
   if (filterText) {
     const query = toKatakana(filterText.toLowerCase().trim());
-    filtered = SKILLS.filter(s => {
+    filtered = filtered.filter(s => {
       const nameMatch = toKatakana(s.name || "").includes(query);
       const effectMatch = toKatakana(s.effect || "").includes(query);
       return nameMatch || effectMatch;
     });
+  }
+  if (skillTagFilters.size > 0) {
+    filtered = filtered.filter(s => (s.tags || []).some(t => skillTagFilters.has(t)));
   }
 
   const categories = [...new Set(SKILLS.map(s => s.category))];
@@ -849,6 +883,10 @@ function renderSkillToggleList(filterText = "") {
     `).join("");
     return `<div class="skill-category-heading">${SKILL_CATEGORY_JA[cat] || cat}</div>${rows}`;
   }).join("");
+
+  if (filtered.length === 0) {
+    list.innerHTML = `<p class="hint">条件に一致するスキルがありません。</p>`;
+  }
 
   list.querySelectorAll(".owned-toggle").forEach(el => {
     el.addEventListener("click", () => {
