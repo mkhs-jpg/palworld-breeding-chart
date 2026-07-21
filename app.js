@@ -26,7 +26,7 @@ let SKILLS = []; // パッシブスキル一覧(出典: skills-data.json、gamew
 // 所持パルごとにタグ付けした「持たせているパッシブスキル」({ [palId]: number[](スキルid) })。
 // ゲーム内の個体固有情報でありwikiデータからは分からないため、ユーザーが手動でタグ付けする。
 let palSkills = {};
-let selectedSkillId = null; // スキル継承タブで選択中のスキルid(単一選択、未選択はnull)
+let selectedSkillIds = []; // スキル継承タブで選択中のスキルid配列(複数選択可、未選択は空配列)
 let ownedIds = new Set();
 let ownedSortMode = "aiueo"; // "aiueo" | "no"
 let targetSortMode = "aiueo";
@@ -817,11 +817,17 @@ function renderComboResults() {
 // ---------- スキル継承(パッシブスキルを持つ所持パルを②の経由候補として使う) ----------
 // SKILLSはwikiやゲーム内データから機械的には分からない「個体固有情報」なので、
 // ①の所持パルとスキルの対応(palSkills)はユーザーが手動でタグ付けする。
-// 計算自体は既存の②(requiredPalIds、OR条件)の仕組みをそのまま再利用する
-// (=「継承するスキルを持ったパルが複数いても、その中のどれか1匹が使われればよい」という
-// ユーザー要望と、②の既存セマンティクスが完全に一致するため)。
+// スキルは複数選択できる(1匹の所持パルが複数のスキルを持っている場合や、複数種類のスキルを
+// まとめて継承したい場合を踏まえた作り)。選んだスキルごとに候補グループを作り、
+// findBreedingRouteViaAll/findBreedingRouteMinHatchTimeAll(グループ内OR/グループ間AND)へ渡すことで
+// 「選んだスキルそれぞれについて少なくとも1匹の候補が使われるルート」を計算する。
+// 「候補全体のうちどれか1匹だけ使えばよい」ルートは既存の②(requiredPalIds、OR条件)をそのまま使う。
 
-// ①スキルを選ぶ。単一選択リスト(③の作りたいパル選択と同様の見た目)。
+// スキルのcategoryキー→日本語見出し。SKILLSのcategoryフィールド(work/combat)に対応する。
+const SKILL_CATEGORY_JA = { work: "作業系", combat: "戦闘系" };
+
+// ①スキルを選ぶ。複数選択可(継承したいスキルが複数ある場合に対応)。
+// 作業系/戦闘系のカテゴリ見出しで種類ごとにグループ分けして表示する。
 function renderSkillToggleList(filterText = "") {
   const list = document.getElementById("skillToggleList");
   let filtered = SKILLS;
@@ -834,17 +840,25 @@ function renderSkillToggleList(filterText = "") {
     });
   }
 
-  list.innerHTML = filtered.map(s => `
-    <div class="owned-toggle ${selectedSkillId === s.id ? "on" : ""}" data-id="${s.id}" title="${s.effect}">${s.name}</div>
-  `).join("");
+  const categories = [...new Set(SKILLS.map(s => s.category))];
+  list.innerHTML = categories.map(cat => {
+    const items = filtered.filter(s => s.category === cat);
+    if (items.length === 0) return "";
+    const rows = items.map(s => `
+      <div class="owned-toggle ${selectedSkillIds.includes(s.id) ? "on" : ""}" data-id="${s.id}" title="${s.effect}">${s.name}</div>
+    `).join("");
+    return `<div class="skill-category-heading">${SKILL_CATEGORY_JA[cat] || cat}</div>${rows}`;
+  }).join("");
 
   list.querySelectorAll(".owned-toggle").forEach(el => {
     el.addEventListener("click", () => {
       const id = Number(el.dataset.id);
-      selectedSkillId = selectedSkillId === id ? null : id;
-      list.querySelectorAll(".owned-toggle").forEach(t => {
-        t.classList.toggle("on", Number(t.dataset.id) === selectedSkillId);
-      });
+      if (selectedSkillIds.includes(id)) {
+        selectedSkillIds = selectedSkillIds.filter(sid => sid !== id);
+      } else {
+        selectedSkillIds = [...selectedSkillIds, id];
+      }
+      el.classList.toggle("on", selectedSkillIds.includes(id));
       updateSkillSelected();
       renderSkillPalTagList();
     });
@@ -856,50 +870,61 @@ function renderSkillToggleList(filterText = "") {
 function updateSkillSelected() {
   const el = document.getElementById("skillSelected");
   const card = document.getElementById("skillPalTaggingCard");
-  const skill = selectedSkillId != null ? SKILLS.find(s => s.id === selectedSkillId) : null;
-  el.textContent = skill ? `選択中: ${skill.name}(${skill.effect})` : "未選択";
-  card.style.display = skill ? "" : "none";
+  const skills = selectedSkillIds.map(id => SKILLS.find(s => s.id === id)).filter(Boolean);
+  el.textContent = skills.length > 0 ? `選択中: ${skills.map(s => s.name).join("、")}` : "未選択";
+  card.style.display = skills.length > 0 ? "" : "none";
 }
 
-// ②このスキルを持たせている所持パルを選ぶ。①の所持パルだけを候補にする複数選択リスト。
+// ②選んだスキルそれぞれについて、それを持たせている所持パルを選ぶ。
+// 1匹が複数のスキルを持っている場合も踏まえ、選択中のスキルごとに独立したチェックリストを並べて表示する
+// (同じ所持パルが複数のリストにまたがってチェックされていてもよい)。①の所持パルだけが候補になる。
 function renderSkillPalTagList() {
-  const list = document.getElementById("skillPalTagList");
-  if (selectedSkillId == null) {
-    list.innerHTML = "";
-    document.getElementById("skillPalTagCount").textContent = "0匹";
+  const container = document.getElementById("skillPalTagList");
+  if (selectedSkillIds.length === 0) {
+    container.innerHTML = "";
     return;
   }
   const owned = PALS.filter(p => ownedIds.has(p.id));
   const sorted = sortPals(owned, ownedSortMode);
-  const taggedIds = (id) => (palSkills[id] || []).includes(selectedSkillId);
 
-  list.innerHTML = sorted.map(p => `
-    <div class="owned-toggle ${taggedIds(p.id) ? "on" : ""}" data-id="${p.id}">${p.name}</div>
-  `).join("");
+  container.innerHTML = selectedSkillIds.map(skillId => {
+    const skill = SKILLS.find(s => s.id === skillId);
+    const rows = sorted.map(p => `
+      <div class="owned-toggle ${(palSkills[p.id] || []).includes(skillId) ? "on" : ""}" data-id="${p.id}" data-skill-id="${skillId}">${p.name}</div>
+    `).join("");
+    return `
+      <div class="skill-tag-group">
+        <div class="skill-category-heading">「${skill ? skill.name : "?"}」を持たせている所持パル <span class="skill-tag-count" data-skill-count-id="${skillId}"></span></div>
+        <div class="owned-toggle-list" style="max-height:150px;">${rows}</div>
+      </div>
+    `;
+  }).join("");
 
-  list.querySelectorAll(".owned-toggle").forEach(el => {
+  container.querySelectorAll(".owned-toggle").forEach(el => {
     el.addEventListener("click", () => {
       const id = Number(el.dataset.id);
+      const skillId = Number(el.dataset.skillId);
       const skillIds = palSkills[id] || [];
-      if (skillIds.includes(selectedSkillId)) {
-        palSkills[id] = skillIds.filter(sid => sid !== selectedSkillId);
+      if (skillIds.includes(skillId)) {
+        palSkills[id] = skillIds.filter(sid => sid !== skillId);
         if (palSkills[id].length === 0) delete palSkills[id];
       } else {
-        palSkills[id] = [...skillIds, selectedSkillId];
+        palSkills[id] = [...skillIds, skillId];
       }
       savePalSkills();
-      el.classList.toggle("on", (palSkills[id] || []).includes(selectedSkillId));
-      updateSkillPalTagCount();
+      el.classList.toggle("on", (palSkills[id] || []).includes(skillId));
+      updateSkillPalTagCount(skillId);
     });
   });
 
-  updateSkillPalTagCount();
+  selectedSkillIds.forEach(skillId => updateSkillPalTagCount(skillId));
 }
 
-function updateSkillPalTagCount() {
-  if (selectedSkillId == null) return;
-  const count = Object.values(palSkills).filter(ids => ids.includes(selectedSkillId)).length;
-  document.getElementById("skillPalTagCount").textContent = `${count}匹`;
+function updateSkillPalTagCount(skillId) {
+  const el = document.querySelector(`[data-skill-count-id="${skillId}"]`);
+  if (!el) return;
+  const count = Object.values(palSkills).filter(ids => ids.includes(skillId)).length;
+  el.textContent = `(${count}匹)`;
 }
 
 // ③作りたいパルを選択。③(配合ルート検索タブ)と同じselectedTargetIdを共有し、
@@ -946,13 +971,14 @@ function updateSkillTargetSelected() {
   }
 }
 
-// このスキルを持つ所持パル(候補)について、「候補のうち少なくとも1匹を使うルート」と
-// 「候補全員を実際に使うルート」の2つを計算しスキル継承タブ内に並べて表示する。
-// あわせて②(requiredPalIds)にも候補を反映し、配合ルート検索タブ側とも状態を同期させておく
+// 選んだスキルそれぞれについて、そのスキルを持たせている所持パル(候補グループ)を求め、
+// 「候補全体のうち少なくとも1匹を使うルート」と「選んだスキルそれぞれについて少なくとも1匹の候補を
+// 使うルート(スキルが複数あれば、その全スキル分を満たす)」の2つを計算しスキル継承タブ内に表示する。
+// あわせて②(requiredPalIds)にも候補全体を反映し、配合ルート検索タブ側とも状態を同期させておく
 // (そちらでピン留め等のフル機能付きで見たい場合にすぐ使えるように)。
 function calcSkillRoute() {
   const hint = document.getElementById("skillCalcHint");
-  if (selectedSkillId == null) {
+  if (selectedSkillIds.length === 0) {
     hint.textContent = "①でスキルを選択してください。";
     return;
   }
@@ -960,15 +986,21 @@ function calcSkillRoute() {
     hint.textContent = "③で作りたいパルを選択してください。";
     return;
   }
-  const candidateIds = PALS
-    .filter(p => ownedIds.has(p.id) && (palSkills[p.id] || []).includes(selectedSkillId))
-    .map(p => p.id);
-  if (candidateIds.length === 0) {
-    hint.textContent = "②でこのスキルを持たせている所持パルを選んでください。";
+
+  // スキルごとの候補グループ(グループ内OR/グループ間ANDのアルゴリズムにそのまま渡す)
+  const groups = selectedSkillIds.map(skillId =>
+    PALS.filter(p => ownedIds.has(p.id) && (palSkills[p.id] || []).includes(skillId)).map(p => p.id)
+  );
+  const emptySkillNames = selectedSkillIds
+    .filter((skillId, i) => groups[i].length === 0)
+    .map(skillId => { const s = SKILLS.find(x => x.id === skillId); return s ? s.name : skillId; });
+  if (emptySkillNames.length > 0) {
+    hint.textContent = `②で「${emptySkillNames.join("、")}」を持たせている所持パルを選んでください。`;
     return;
   }
   hint.textContent = "";
 
+  const candidateIds = [...new Set(groups.flat())];
   requiredPalIds = candidateIds;
   renderRequiredToggleList();
 
@@ -976,21 +1008,25 @@ function calcSkillRoute() {
   const owned = PALS.filter(p => ownedIds.has(p.id));
   const availableOwned = owned.filter(p => !excludedIds.has(p.id));
 
-  const routeAny = computeRoute(targetPal, owned); // 既存のOR条件(グローバルrequiredPalIds/routeModeに従う)
-  const routeAll = routeMode === "hatchtime"
-    ? findBreedingRouteMinHatchTimeAll(PALS, targetPal, availableOwned, BREEDING_EXAMPLES, candidateIds)
-    : findBreedingRouteViaAll(PALS, targetPal, availableOwned, candidateIds, BREEDING_EXAMPLES, 10);
+  const routeAny = computeRoute(targetPal, owned); // 既存のOR条件(グローバルrequiredPalIds/routeModeに従う、候補全体のどれか1匹)
+  const routeAllSkills = routeMode === "hatchtime"
+    ? findBreedingRouteMinHatchTimeAll(PALS, targetPal, availableOwned, BREEDING_EXAMPLES, groups)
+    : findBreedingRouteViaAll(PALS, targetPal, availableOwned, groups, BREEDING_EXAMPLES, 10);
 
-  renderSkillRouteResults(targetPal, routeAny, routeAll, candidateIds, new Set(ownedIds));
+  renderSkillRouteResults(targetPal, routeAny, routeAllSkills, candidateIds, new Set(ownedIds));
 }
 
-// スキル継承タブ内に「どれか1匹を使うルート」「全員を使うルート」の2枚を並べて表示する。
-// 配合ルート検索タブのカルーセル(ピン留め・除外・代替組み合わせ等)とは独立した読み取り専用表示。
-function renderSkillRouteResults(targetPal, routeAny, routeAll, requiredIds, ownedIdSet) {
+// スキル継承タブ内に「候補全体のうちどれか1匹を使うルート」「選んだスキルそれぞれを満たすルート」の
+// 2枚を並べて表示する。配合ルート検索タブのカルーセル(ピン留め・除外・代替組み合わせ等)とは
+// 独立した読み取り専用表示。
+function renderSkillRouteResults(targetPal, routeAny, routeAllSkills, requiredIds, ownedIdSet) {
   const box = document.getElementById("skillRouteResults");
+  const allLabel = selectedSkillIds.length > 1
+    ? "選んだスキルをそれぞれ少なくとも1匹の候補でカバーするルート"
+    : "候補全員を実際に使うルート";
   box.innerHTML =
     buildSkillRouteCard("候補のうち少なくとも1匹を使うルート", targetPal, routeAny, ownedIdSet, requiredIds) +
-    buildSkillRouteCard("候補全員を実際に使うルート", targetPal, routeAll, ownedIdSet, requiredIds);
+    buildSkillRouteCard(allLabel, targetPal, routeAllSkills, ownedIdSet, requiredIds);
 }
 
 function buildSkillRouteCard(label, targetPal, route, ownedIdSet, requiredIds) {

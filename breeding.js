@@ -339,22 +339,25 @@ function findBreedingRouteVia(pals, targetPal, ownedPals, requiredPalIds, exampl
   return { found: false, generations: maxGenerations, steps: [], reason: "not-found-within-limit" };
 }
 
-// findBreedingRouteViaのAND版。「requiredPalIdsで指定した所持パル全員を、経路のどこかで実際に
-// 配合の親として使ったルート」だけを探す(スキル継承タブ専用。②本体のOR条件とは別に、
-// 「候補全員を使うルート」と「どれか1匹を使うルート」の両方をユーザーに見せたい場合に使う)。
-// requiredPalIdsが空配列の場合はfindBreedingRouteと完全に同じ挙動になる。
+// findBreedingRouteViaのAND版。「requiredGroupsで指定したグループそれぞれについて、
+// 少なくとも1匹をそのグループのメンバーから経路のどこかで実際に配合の親として使ったルート」を探す
+// (グループ内はOR、グループ間はAND)。requiredGroupsは配列の配列(例: 各スキルごとの候補パルid配列)で、
+// 1グループ1要素なら「その個体を必ず使う」、1グループのみなら「その中の誰か1匹を使う」の意味になる
+// (前者は個々のパル全員必須、後者は②本体のOR条件と同じ意味になり、この関数はどちらも表現できる)。
+// requiredGroupsが空(またはグループが無い)場合はfindBreedingRouteと完全に同じ挙動になる。
 //
-// OR版(findBreedingRouteVia)の「使ったか(with)/未使用か(without)」の2状態では「誰を使ったか」を
-// 区別できないため、パルiごとに1ビットを割り当てたビットマスクで「これまでに経由必須パルとして
-// 実際に使ったものの集合」を管理し、全ビットが立った状態(fullMask)にtargetPalが到達した時点で
-// 全員を経由したとみなし確定する(マスクは配合するたびに単調に増加していくだけなので、
-// 負のコストが無いのと同様に無限ループの心配は無い)。
-function findBreedingRouteViaAll(pals, targetPal, ownedPals, requiredPalIds, exampleMap = {}, maxGenerations = 10) {
-  const reqIds = [...new Set(requiredPalIds || [])];
-  if (reqIds.length === 0) {
+// OR版(findBreedingRouteVia)の「使ったか(with)/未使用か(without)」の2状態では「どのグループを
+// 満たしたか」を区別できないため、グループiごとに1ビットを割り当てたビットマスクで「これまでに
+// 満たしたグループの集合」を管理し、全ビットが立った状態(fullMask)にtargetPalが到達した時点で
+// 全グループを満たしたとみなし確定する(マスクは配合するたびに単調に増加していくだけなので、
+// 負のコストが無いのと同様に無限ループの心配は無い)。1匹のパルが複数グループに同時に属する場合
+// (例: 1匹で2つのスキルを持っている)は、そのパルを親に使った時点で該当する全ビットが一度に立つ。
+function findBreedingRouteViaAll(pals, targetPal, ownedPals, requiredGroups, exampleMap = {}, maxGenerations = 10) {
+  const groups = (requiredGroups || []).map(g => [...new Set(g || [])]).filter(g => g.length > 0);
+  if (groups.length === 0) {
     return findBreedingRoute(pals, targetPal, ownedPals, exampleMap, maxGenerations);
   }
-  if (!reqIds.every(id => ownedPals.some(p => p.id === id))) {
+  if (!groups.every(g => g.some(id => ownedPals.some(p => p.id === id)))) {
     return { found: false, generations: 0, steps: [], reason: "required-pal-not-owned" };
   }
   if (ownedPals.some(p => p.id === targetPal.id)) {
@@ -364,8 +367,12 @@ function findBreedingRouteViaAll(pals, targetPal, ownedPals, requiredPalIds, exa
     return { found: false, generations: 0, steps: [], reason: "no-owned-pals" };
   }
 
-  const bitOf = new Map(reqIds.map((id, i) => [id, 1 << i]));
-  const fullMask = (1 << reqIds.length) - 1;
+  const bitOf = new Map();
+  groups.forEach((g, i) => {
+    const bit = 1 << i;
+    for (const id of g) bitOf.set(id, (bitOf.get(id) || 0) | bit);
+  });
+  const fullMask = (1 << groups.length) - 1;
   const stateKey = (id, mask) => `${id}:${mask}`;
 
   // obtainedByMask.get(mask) = そのmaskちょうどで到達可能なパルidの集合
@@ -398,8 +405,8 @@ function findBreedingRouteViaAll(pals, targetPal, ownedPals, requiredPalIds, exa
         // 経由必須パルを自分自身とだけ配合しても実質的には何も進んでいないので「使った」扱いにしない
         let childMask = a.mask | b.mask;
         if (a.pal.id !== b.pal.id) {
-          if (bitOf.has(a.pal.id)) childMask |= bitOf.get(a.pal.id);
-          if (bitOf.has(b.pal.id)) childMask |= bitOf.get(b.pal.id);
+          childMask |= (bitOf.get(a.pal.id) || 0);
+          childMask |= (bitOf.get(b.pal.id) || 0);
         }
 
         const cost = stepsCost.get(stateKey(a.pal.id, a.mask)) + stepsCost.get(stateKey(b.pal.id, b.mask)) + 1;
@@ -633,12 +640,13 @@ function findBreedingRouteMinHatchTime(pals, targetPal, ownedPals, exampleMap = 
 }
 
 // findBreedingRouteMinHatchTimeのAND版(findBreedingRouteViaAllの孵化時間最小モード版)。
-// 「requiredPalIds全員を実際に配合の親として使ったルート」の中で孵化時間合計が最小になるものを
-// ダイクストラ法で探す。findBreedingRouteViaAllと同様、状態をビットマスクで管理する
+// 「requiredGroupsの各グループについて、少なくとも1匹をそのメンバーから実際に配合の親として
+// 使ったルート」の中で孵化時間合計が最小になるものをダイクストラ法で探す(グループ内OR/グループ間AND、
+// 詳細はfindBreedingRouteViaAllのコメント参照)。状態をビットマスクで管理する
 // (findBreedingRouteMinHatchTimeの"with"/"without"2色を、複数ビットに一般化したもの)。
-function findBreedingRouteMinHatchTimeAll(pals, targetPal, ownedPals, exampleMap = {}, requiredPalIds = null) {
-  const reqIds = [...new Set(requiredPalIds || [])];
-  if (reqIds.length > 0 && !reqIds.every(id => ownedPals.some(p => p.id === id))) {
+function findBreedingRouteMinHatchTimeAll(pals, targetPal, ownedPals, exampleMap = {}, requiredGroups = null) {
+  const groups = (requiredGroups || []).map(g => [...new Set(g || [])]).filter(g => g.length > 0);
+  if (groups.length > 0 && !groups.every(g => g.some(id => ownedPals.some(p => p.id === id)))) {
     return { found: false, totalHatchHours: 0, steps: [], reason: "required-pal-not-owned" };
   }
   if (ownedPals.some(p => p.id === targetPal.id)) {
@@ -648,8 +656,12 @@ function findBreedingRouteMinHatchTimeAll(pals, targetPal, ownedPals, exampleMap
     return { found: false, totalHatchHours: 0, steps: [], reason: "no-owned-pals" };
   }
 
-  const bitOf = new Map(reqIds.map((id, i) => [id, 1 << i]));
-  const fullMask = reqIds.length > 0 ? (1 << reqIds.length) - 1 : 0;
+  const bitOf = new Map();
+  groups.forEach((g, i) => {
+    const bit = 1 << i;
+    for (const id of g) bitOf.set(id, (bitOf.get(id) || 0) | bit);
+  });
+  const fullMask = groups.length > 0 ? (1 << groups.length) - 1 : 0;
 
   const key = (id, mask) => `${id}:${mask}`;
   const dist = new Map();
@@ -765,7 +777,7 @@ function findBreedingRouteMinHatchTimeAll(pals, targetPal, ownedPals, exampleMap
     found: true,
     totalHatchHours: dist.get(targetKeyGoal),
     steps,
-    reason: reqIds.length > 0 ? "bred-via-all-min-hatch" : "bred-min-hatch"
+    reason: groups.length > 0 ? "bred-via-all-min-hatch" : "bred-min-hatch"
   };
 }
 

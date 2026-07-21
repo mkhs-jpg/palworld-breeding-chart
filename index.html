@@ -333,6 +333,22 @@
     color: var(--accent-ink);
   }
 
+  /* ---- スキル継承タブ: カテゴリ見出し・スキルごとのタグ付けグループ ---- */
+  .skill-category-heading {
+    flex: 1 0 100%;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--ink-secondary);
+    margin-top: 6px;
+    padding-bottom: 2px;
+    border-bottom: 1px solid var(--border);
+  }
+  .skill-category-heading:first-child { margin-top: 0; }
+  .skill-tag-count { font-weight: 400; color: var(--ink-muted); }
+  .skill-tag-group { margin-bottom: 14px; }
+  .skill-tag-group:last-child { margin-bottom: 0; }
+  .skill-tag-group .skill-category-heading { border-bottom: none; margin-bottom: 6px; }
+
   .owned-count {
     font-size: 0.9rem;
     font-weight: 700;
@@ -711,20 +727,19 @@
 <div id="skillsView" style="display:none;">
 
 <div class="card">
-  <h2>①スキルを選ぶ</h2>
-  <div class="hint" style="margin-bottom:12px;">継承したいパッシブスキルを選ぶと、そのスキルを持たせている所持パルにチェックを付けられます。継承するスキルを持ったパルが複数いる場合、「候補のうち少なくとも1匹を使うルート」と「候補全員を実際に使うルート」の2つを計算して見比べられます。</div>
+  <h2>①スキルを選ぶ(複数選択可)</h2>
+  <div class="hint" style="margin-bottom:12px;">継承したいパッシブスキルを選ぶと(複数選択できます)、種類(作業系/戦闘系)ごとに一覧表示されます。選んだスキルごとに、それを持たせている所持パルにチェックを付けられます。</div>
   <div class="row">
     <input type="text" id="skillSearch" class="owned-search" placeholder="スキル名や効果で検索..." style="flex:1;">
   </div>
-  <div class="owned-toggle-list" id="skillToggleList" style="max-height:200px;"></div>
+  <div class="owned-toggle-list" id="skillToggleList" style="max-height:220px;"></div>
   <div class="owned-count" id="skillSelected">未選択</div>
 </div>
 
 <div class="card" id="skillPalTaggingCard" style="display:none;">
-  <h2>②このスキルを持たせている所持パルを選ぶ</h2>
-  <div class="hint" style="margin-bottom:12px;">チェックした所持パルは、以後このスキルの継承候補としてブラウザに保存されます。①で持っているパルだけが候補になります。</div>
-  <div class="owned-toggle-list" id="skillPalTagList" style="max-height:200px;"></div>
-  <div class="owned-count" id="skillPalTagCount">0匹</div>
+  <h2>②選んだスキルごとに、持たせている所持パルを選ぶ</h2>
+  <div class="hint" style="margin-bottom:12px;">チェックした所持パルは、以後そのスキルの継承候補としてブラウザに保存されます。①で持っているパルだけが候補になります。1匹が複数のスキルを持っている場合は、それぞれのリストにチェックを付けてください。</div>
+  <div id="skillPalTagList"></div>
 </div>
 
 <div class="card">
