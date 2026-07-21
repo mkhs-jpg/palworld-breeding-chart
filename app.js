@@ -879,7 +879,10 @@ function renderSkillToggleList(filterText = "") {
     const items = filtered.filter(s => s.category === cat);
     if (items.length === 0) return "";
     const rows = items.map(s => `
-      <div class="owned-toggle ${selectedSkillIds.includes(s.id) ? "on" : ""}" data-id="${s.id}" title="${s.effect}">${s.name}</div>
+      <div class="owned-toggle skill-toggle ${selectedSkillIds.includes(s.id) ? "on" : ""}" data-id="${s.id}">
+        <span class="skill-toggle-name">${s.name}</span>
+        <span class="skill-toggle-effect">${s.effect}</span>
+      </div>
     `).join("");
     return `<div class="skill-category-heading">${SKILL_CATEGORY_JA[cat] || cat}</div>${rows}`;
   }).join("");
