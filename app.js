@@ -1049,39 +1049,66 @@ function calcSkillRoute() {
   const owned = PALS.filter(p => ownedIds.has(p.id));
   const availableOwned = owned.filter(p => !excludedIds.has(p.id));
 
-  const routeAny = computeRoute(targetPal, owned); // 既存のOR条件(グローバルrequiredPalIds/routeModeに従う、候補全体のどれか1匹)
-  const routeAllSkills = routeMode === "hatchtime"
+  let routeAny = computeRoute(targetPal, owned); // 既存のOR条件(グローバルrequiredPalIds/routeModeに従う、候補全体のどれか1匹)
+  let routeAllSkills = routeMode === "hatchtime"
     ? findBreedingRouteMinHatchTimeAll(PALS, targetPal, availableOwned, BREEDING_EXAMPLES, groups)
     : findBreedingRouteViaAll(PALS, targetPal, availableOwned, groups, BREEDING_EXAMPLES, 10);
 
-  renderSkillRouteResults(targetPal, routeAny, routeAllSkills, candidateIds, new Set(ownedIds));
+  // 「作りたいパル」を既に持っている場合(候補の中の1匹自身が対象、等)、素のfindBreedingRouteVia系は
+  // 即座にalready-ownedを返してルートを一切出さない。配合ルート検索タブのbuildSlideHtmlと同様、
+  // 対象パル自身を所持プールから除いてもう1匹分のルートを試算し直す(性別が合う個体が欲しい場合等のため)。
+  let alreadyOwnedNote = false;
+  if (routeAny.reason === "already-owned" || routeAllSkills.reason === "already-owned") {
+    alreadyOwnedNote = true;
+    const ownedWithoutTarget = owned.filter(p => p.id !== targetPal.id);
+    const availableWithoutTarget = ownedWithoutTarget.filter(p => !excludedIds.has(p.id));
+    const groupsWithoutTarget = groups.map(g => g.filter(id => id !== targetPal.id));
+    if (routeAny.reason === "already-owned" && ownedWithoutTarget.length > 0) {
+      routeAny = computeRoute(targetPal, ownedWithoutTarget);
+    }
+    if (routeAllSkills.reason === "already-owned" && availableWithoutTarget.length > 0) {
+      routeAllSkills = routeMode === "hatchtime"
+        ? findBreedingRouteMinHatchTimeAll(PALS, targetPal, availableWithoutTarget, BREEDING_EXAMPLES, groupsWithoutTarget)
+        : findBreedingRouteViaAll(PALS, targetPal, availableWithoutTarget, groupsWithoutTarget, BREEDING_EXAMPLES, 10);
+    }
+  }
+
+  renderSkillRouteResults(targetPal, routeAny, routeAllSkills, candidateIds, new Set(ownedIds), alreadyOwnedNote);
 }
 
 // スキル継承タブ内に「候補全体のうちどれか1匹を使うルート」「選んだスキルそれぞれを満たすルート」の
 // 2枚を並べて表示する。配合ルート検索タブのカルーセル(ピン留め・除外・代替組み合わせ等)とは
 // 独立した読み取り専用表示。
-function renderSkillRouteResults(targetPal, routeAny, routeAllSkills, requiredIds, ownedIdSet) {
+function renderSkillRouteResults(targetPal, routeAny, routeAllSkills, requiredIds, ownedIdSet, alreadyOwnedNote) {
   const box = document.getElementById("skillRouteResults");
   const allLabel = selectedSkillIds.length > 1
     ? "選んだスキルをそれぞれ少なくとも1匹の候補でカバーするルート"
     : "候補全員を実際に使うルート";
   box.innerHTML =
-    buildSkillRouteCard("候補のうち少なくとも1匹を使うルート", targetPal, routeAny, ownedIdSet, requiredIds) +
-    buildSkillRouteCard(allLabel, targetPal, routeAllSkills, ownedIdSet, requiredIds);
+    buildSkillRouteCard("候補のうち少なくとも1匹を使うルート", targetPal, routeAny, ownedIdSet, requiredIds, alreadyOwnedNote) +
+    buildSkillRouteCard(allLabel, targetPal, routeAllSkills, ownedIdSet, requiredIds, alreadyOwnedNote);
 }
 
-function buildSkillRouteCard(label, targetPal, route, ownedIdSet, requiredIds) {
+function buildSkillRouteCard(label, targetPal, route, ownedIdSet, requiredIds, alreadyOwnedNote) {
+  // 「作りたいパル」を既に持っている場合、calcSkillRoute側で対象パル自身を除いた
+  // もう1匹分のルートに置き換え済み(それでも作れない/候補が対象パル自身しかいない等の場合はここに来る)。
+  const ownedHint = alreadyOwnedNote
+    ? `<p class="hint" style="margin-bottom:10px;">「${targetPal.name}」はすでに持っています。性別が合う個体が欲しい場合など、もう1匹配合したい時のルート:</p>`
+    : "";
   if (route.reason === "already-owned") {
     return `<div class="card"><h2>${label}</h2><p class="hint">「${targetPal.name}」はすでに持っているパルの中にあります。</p></div>`;
   }
   if (route.reason === "required-pal-not-owned" || route.reason === "no-owned-pals") {
-    return `<div class="card"><h2>${label}</h2><p class="hint">候補パルが所持リストから外れています。②を選び直してください。</p></div>`;
+    const msg = alreadyOwnedNote
+      ? `「${targetPal.name}」自身を除くと候補パルが所持リストにいません(候補が「${targetPal.name}」自身しかいなかった可能性があります)。`
+      : "候補パルが所持リストから外れています。②を選び直してください。";
+    return `<div class="card"><h2>${label}</h2>${ownedHint}<p class="hint">${msg}</p></div>`;
   }
 
   const isHatchMode = route.totalHatchHours !== undefined;
   if (!route.found) {
     const limitNote = isHatchMode ? "" : "10世代以内に";
-    return `<div class="card"><h2>${label}</h2><p class="hint">${limitNote}「${targetPal.name}」へ到達できませんでした。</p></div>`;
+    return `<div class="card"><h2>${label}</h2>${ownedHint}<p class="hint">${limitNote}「${targetPal.name}」へ到達できませんでした。</p></div>`;
   }
 
   const palColorMap = buildPalColorMap(route.steps);
@@ -1117,6 +1144,7 @@ function buildSkillRouteCard(label, targetPal, route, ownedIdSet, requiredIds) {
   return `
     <div class="card">
       <h2>${label}</h2>
+      ${ownedHint}
       <p class="result-summary">${summaryLine}</p>
       <div>${stepsHtml}</div>
     </div>
