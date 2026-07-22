@@ -473,13 +473,17 @@ function findBreedingRouteViaAll(pals, targetPal, ownedPals, requiredGroups, exa
 // (with×何か=常にwith行きなので、スキル継承済み扱いも自動的に引き継がれる)。
 //
 // 「作りたいパル」に選んだ種を既に持っていても、その個体がスキルを持っている保証は無い(②で
-// タグ付けした候補自身でない限り)。そのため、既に持っているtargetのうち候補自身ではないものは
-// 所持プールから除外し、実際に配合ルートを試算させる(単体版findBreedingRouteViaの「already-owned」
-// 即時確定とは違い、③の「もう1匹作る」フォールバックと同じ考え方をここでは検索の入口で行う)。
-// 除外した結果それでもルートが見つからない場合は、無理に「見つかりませんでした」と出さず
-// 「既に持っています」に静かにフォールバックする(除外前の元の状態に近い体験に留める)。
-// 一方、既に持っていて、かつ②のスキル候補自身でもあるtargetは、その個体自身が定義上スキルを
-// 持っているので無条件で達成済み(alreadyOwnedWithSkill)として扱う。
+// タグ付けした候補自身でない限り)。そのため見つけたい状態は「targetPalの種がwith色で得られたか」
+// (単体版findBreedingRouteViaの「already-owned」即時確定とは違い、所持済みでも無条件では達成扱いに
+// しない)。**所持プール自体からはtargetを除外しない**のが重要な点: 既に持っているtarget自身も、
+// with色の別の親と掛け合わせれば「タマコッコ(所持, without)×チョロゾウ(with)→タマコッコ(with)」の
+// ように自分自身の亜種をwith化する経路の一部として使えるため、除外すると逆にこの手の中継地点を
+// 使ったルートを見つけられなくなる(実際に「タマコッコはチョロゾウとしか配合できない」特殊なパルで
+// 検証中に発覚し、除外方式では見つからなかった6世代ルートが除外をやめたら見つかった)。
+// 既に持っていて、かつ②のスキル候補自身でもあるtargetだけは、その個体自身が定義上スキルを
+// 持っているので、探索するまでもなく無条件で達成済み(alreadyOwnedWithSkill)として扱う。
+// 探索してもwith色に到達できなかった所持済みtargetは、怖いエラーを出さず「既に持っています」に
+// 静かにフォールバックする。
 function findBreedingRouteMultiVia(pals, targetPals, ownedPals, requiredPalIds, exampleMap = {}, maxGenerations = 10) {
   const reqIdSet = new Set(requiredPalIds || []);
   const makeResults = (mapFn) => targetPals.map(tp => mapFn(tp));
@@ -495,25 +499,20 @@ function findBreedingRouteMultiVia(pals, targetPals, ownedPals, requiredPalIds, 
   const alreadyOwnedWithSkill = new Set(
     targetPals.filter(tp => ownedIdSet.has(tp.id) && reqIdSet.has(tp.id)).map(tp => tp.id)
   );
-  const excludeFromPool = new Set(
-    targetPals.filter(tp => ownedIdSet.has(tp.id) && !alreadyOwnedWithSkill.has(tp.id)).map(tp => tp.id)
-  );
-  let effectiveOwnedPals = ownedPals.filter(p => !excludeFromPool.has(p.id));
-  if (effectiveOwnedPals.length === 0) effectiveOwnedPals = ownedPals; // 種親が無くなってしまう場合は除外しない
 
   const remaining = new Set(
     targetPals.filter(tp => !alreadyOwnedWithSkill.has(tp.id)).map(tp => tp.id)
   );
   const foundAtGen = new Map();
 
-  const withoutIds = new Set(effectiveOwnedPals.map(p => p.id));
+  const withoutIds = new Set(ownedPals.map(p => p.id));
   const withIds = new Set();
   const viaWithout = new Map();
   const viaWith = new Map();
-  const stepsCostWithout = new Map(effectiveOwnedPals.map(p => [p.id, 0]));
+  const stepsCostWithout = new Map(ownedPals.map(p => [p.id, 0]));
   const stepsCostWith = new Map();
   const genOf = new Map(); // "color:id" -> このパル(色)が最初に得られた世代(初期所持は0)
-  effectiveOwnedPals.forEach(p => genOf.set("without:" + p.id, 0));
+  ownedPals.forEach(p => genOf.set("without:" + p.id, 0));
 
   for (let gen = 1; gen <= maxGenerations && remaining.size > 0; gen++) {
     const withoutPool = [...withoutIds].map(id => pals.find(p => p.id === id));
@@ -642,8 +641,8 @@ function findBreedingRouteMultiVia(pals, targetPals, ownedPals, requiredPalIds, 
   const results = targetPals.map(tp => {
     if (alreadyOwnedWithSkill.has(tp.id)) return { targetPal: tp, found: true, alreadyOwned: true, hasSkillAlready: true };
     if (foundAtGen.has(tp.id)) return { targetPal: tp, found: true, alreadyOwned: ownedIdSet.has(tp.id), generation: foundAtGen.get(tp.id) };
-    // 除外して探しても見つからなかった場合は、元々持っていたことにフォールバックする(怖いエラーにしない)
-    if (excludeFromPool.has(tp.id)) return { targetPal: tp, found: true, alreadyOwned: true };
+    // with色に到達できなかった場合、所持済みなら怖いエラーを出さず「既に持っています」に静かにフォールバックする
+    if (ownedIdSet.has(tp.id)) return { targetPal: tp, found: true, alreadyOwned: true };
     return { targetPal: tp, found: false, alreadyOwned: false, reason: "not-found-within-limit" };
   });
 
