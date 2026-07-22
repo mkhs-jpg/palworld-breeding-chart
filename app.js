@@ -1119,8 +1119,12 @@ function renderSkillMultiRouteResults(multi, ownedIdSet, requiredIds) {
   const { results, steps } = multi;
 
   const statusRows = results.map(r => {
-    if (r.alreadyOwned) return `<li>「${r.targetPal.name}」: すでに持っています</li>`;
-    if (r.found) return `<li>「${r.targetPal.name}」: <strong>${r.generation}世代目</strong>で到達</li>`;
+    if (r.hasSkillAlready) return `<li>「${r.targetPal.name}」: すでに持っています(スキル保持個体として登録済み)</li>`;
+    if (r.found && r.generation !== undefined) {
+      const note = r.alreadyOwned ? "(すでに持っていますが、スキル継承済みの個体をもう1匹作るルート)" : "";
+      return `<li>「${r.targetPal.name}」: <strong>${r.generation}世代目</strong>で到達${note}</li>`;
+    }
+    if (r.alreadyOwned) return `<li>「${r.targetPal.name}」: すでに持っています(スキル継承ルートは見つかりませんでした)</li>`;
     const msg = r.reason === "required-pal-not-owned"
       ? "候補パルが所持リストから外れています"
       : "10世代以内に到達できませんでした";
