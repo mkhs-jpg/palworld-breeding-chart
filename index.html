@@ -775,6 +775,22 @@
 
 <div id="skillRouteResults"></div>
 
+<div class="card">
+  <h2>④(牧場飼育など)複数の作りたいパルをまとめて計算</h2>
+  <div class="hint" style="margin-bottom:12px;">牧場で複数種を飼育していて、全員に同じスキルを継承させたい場合など。①②で選んだスキルを使い、選んだパル同士を配合の中間素材として使い回しながら、まとめて何回の配合で全員揃うかを1本のルートとして計算します(③の単体計算とは別の独立した機能です)。</div>
+  <div class="row">
+    <input type="text" id="skillMultiTargetSearch" class="owned-search" placeholder="作りたいパル名で検索..." style="flex:1;">
+  </div>
+  <div class="owned-toggle-list" id="skillMultiTargetToggleList" style="max-height:200px;"></div>
+  <div class="owned-count" id="skillMultiTargetSelected" style="margin-bottom:12px;">未選択</div>
+  <div class="hint" id="skillMultiCalcHint" style="margin-bottom:8px;"></div>
+  <div class="row">
+    <button id="btnSkillMultiCalc" style="width: 100%; padding: 14px; font-size: 1.05rem;">まとめて計算する</button>
+  </div>
+</div>
+
+<div id="skillMultiRouteResults"></div>
+
 </div>
 
 <div class="card">

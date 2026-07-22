@@ -27,6 +27,7 @@ let SKILLS = []; // パッシブスキル一覧(出典: skills-data.json、gamew
 // ゲーム内の個体固有情報でありwikiデータからは分からないため、ユーザーが手動でタグ付けする。
 let palSkills = {};
 let selectedSkillIds = []; // スキル継承タブで選択中のスキルid配列(複数選択可、未選択は空配列)
+let selectedMultiTargetIds = []; // スキル継承タブ④「複数の作りたいパルをまとめて計算」で選択中のtargetパルid配列
 let ownedIds = new Set();
 let ownedSortMode = "aiueo"; // "aiueo" | "no"
 let targetSortMode = "aiueo";
@@ -714,6 +715,7 @@ function switchView(view) {
     renderSkillToggleList(document.getElementById("skillSearch").value);
     renderSkillPalTagList();
     renderSkillTargetToggleList(document.getElementById("skillTargetSearch").value);
+    renderSkillMultiTargetToggleList(document.getElementById("skillMultiTargetSearch").value);
   }
 }
 
@@ -1012,6 +1014,167 @@ function updateSkillTargetSelected() {
   }
 }
 
+// ④「複数の作りたいパルをまとめて計算」(牧場で飼育する複数種に同じスキルを継承させたい、等)。
+// ③(単体、selectedTargetId)とは独立した複数選択リスト。findBreedingRouteMultiViaに渡し、
+// 選んだ複数のtargetパルを1回のBFSでまとめて追いかけることで、あるtargetが先に生まれれば
+// それ以降は他のtargetを作るための親としてそのまま再利用できる(=まとめて計算する意味がある)。
+function renderSkillMultiTargetToggleList(filterText = "") {
+  const list = document.getElementById("skillMultiTargetToggleList");
+  let filtered = PALS;
+  if (filterText) {
+    const query = toKatakana(filterText.toLowerCase().trim());
+    filtered = PALS.filter(p => {
+      const nameMatch = toKatakana(p.name || "").includes(query);
+      const nameEnMatch = p.nameEn && p.nameEn.toLowerCase().includes(query);
+      return nameMatch || nameEnMatch;
+    });
+  }
+
+  const sorted = sortPals(filtered, targetSortMode);
+
+  list.innerHTML = sorted.map(p => `
+    <div class="owned-toggle ${selectedMultiTargetIds.includes(p.id) ? "on" : ""}" data-id="${p.id}">${p.name}</div>
+  `).join("");
+
+  list.querySelectorAll(".owned-toggle").forEach(el => {
+    el.addEventListener("click", () => {
+      const id = Number(el.dataset.id);
+      if (selectedMultiTargetIds.includes(id)) {
+        selectedMultiTargetIds = selectedMultiTargetIds.filter(tid => tid !== id);
+      } else {
+        selectedMultiTargetIds = [...selectedMultiTargetIds, id];
+      }
+      el.classList.toggle("on", selectedMultiTargetIds.includes(id));
+      updateSkillMultiTargetSelected();
+    });
+  });
+
+  updateSkillMultiTargetSelected();
+}
+
+function updateSkillMultiTargetSelected() {
+  const el = document.getElementById("skillMultiTargetSelected");
+  if (!el) return;
+  if (selectedMultiTargetIds.length === 0) {
+    el.textContent = "未選択";
+    return;
+  }
+  const names = selectedMultiTargetIds.map(id => { const p = PALS.find(x => x.id === id); return p ? p.name : id; });
+  el.textContent = `選択中(${names.length}匹): ${names.join("、")}`;
+}
+
+function calcSkillMultiRoute() {
+  const hint = document.getElementById("skillMultiCalcHint");
+  if (selectedSkillIds.length === 0) {
+    hint.textContent = "①でスキルを選択してください。";
+    return;
+  }
+  if (selectedMultiTargetIds.length === 0) {
+    hint.textContent = "④で作りたいパルを1匹以上選択してください。";
+    return;
+  }
+
+  const candidateIds = [...new Set(
+    selectedSkillIds.flatMap(skillId =>
+      PALS.filter(p => ownedIds.has(p.id) && (palSkills[p.id] || []).includes(skillId)).map(p => p.id)
+    )
+  )];
+  const emptySkillNames = selectedSkillIds
+    .filter(skillId => !PALS.some(p => ownedIds.has(p.id) && (palSkills[p.id] || []).includes(skillId)))
+    .map(skillId => { const s = SKILLS.find(x => x.id === skillId); return s ? s.name : skillId; });
+  if (emptySkillNames.length > 0) {
+    hint.textContent = `②で「${emptySkillNames.join("、")}」を持たせている所持パルを選んでください。`;
+    return;
+  }
+  hint.textContent = "";
+
+  const owned = PALS.filter(p => ownedIds.has(p.id));
+  const availableOwned = owned.filter(p => !excludedIds.has(p.id));
+  const targetPals = selectedMultiTargetIds.map(id => PALS.find(p => p.id === id)).filter(Boolean);
+
+  const multi = findBreedingRouteMultiVia(PALS, targetPals, availableOwned, candidateIds, BREEDING_EXAMPLES, 10);
+  renderSkillMultiRouteResults(multi, new Set(ownedIds), candidateIds);
+}
+
+// computeCriticalPathHours(breeding.js)は「配列末尾のstepの子」を目的のパルとみなす単一target前提のため、
+// 複数targetが混ざったまとめルートにはそのまま使えない。同じ前提(依存の無い配合は並行実行できる)で
+// 全stepの用意完了時刻(ready)を前から計算し、targetの最終step全てのうち一番遅いものを「全員揃う時刻」とする。
+function computeMultiCriticalPathHours(steps, ownedIds) {
+  if (steps.length === 0) return 0;
+  const ready = new Map();
+  for (const id of ownedIds) ready.set(id, 0);
+  let maxFinalReady = 0;
+  for (const s of steps) {
+    const aReady = ready.has(s.parentA.id) ? ready.get(s.parentA.id) : 0;
+    const bReady = ready.has(s.parentB.id) ? ready.get(s.parentB.id) : 0;
+    const childReady = Math.max(aReady, bReady) + getHatchHours(s.child);
+    ready.set(s.child.id, childReady);
+    if (s.finalForTargetIds.length > 0) maxFinalReady = Math.max(maxFinalReady, childReady);
+  }
+  return maxFinalReady;
+}
+
+function renderSkillMultiRouteResults(multi, ownedIdSet, requiredIds) {
+  const box = document.getElementById("skillMultiRouteResults");
+  const { results, steps } = multi;
+
+  const statusRows = results.map(r => {
+    if (r.alreadyOwned) return `<li>「${r.targetPal.name}」: すでに持っています</li>`;
+    if (r.found) return `<li>「${r.targetPal.name}」: <strong>${r.generation}世代目</strong>で到達</li>`;
+    const msg = r.reason === "required-pal-not-owned"
+      ? "候補パルが所持リストから外れています"
+      : "10世代以内に到達できませんでした";
+    return `<li>「${r.targetPal.name}」: ${msg}</li>`;
+  }).join("");
+
+  if (steps.length === 0) {
+    box.innerHTML = `<div class="card"><h2>まとめて計算した結果</h2><ul class="hint">${statusRows}</ul></div>`;
+    return;
+  }
+
+  const palColorMap = buildPalColorMap(steps);
+  const palTag = (pal) => {
+    const isOwned = ownedIdSet.has(pal.id);
+    const ownedClass = isOwned ? "pal-tag-owned" : "pal-tag-bred";
+    const color = !isOwned ? palColorMap.get(pal.id) : null;
+    const colorStyle = color ? ` style="border-color:${color}; color:${color};"` : "";
+    const icon = `<img class="pal-tag-icon" src="images/pal-${pal.paldexId.toLowerCase()}.png" alt="" loading="lazy" onerror="this.style.display='none'">`;
+    return `<span class="pal-tag ${ownedClass}"${colorStyle} data-pal-id="${pal.id}">${icon}${pal.name}</span>`;
+  };
+
+  const stepsHtml = steps.map((s, i) => {
+    const usesRequired = requiredIds.some(id => s.parentA.id === id || s.parentB.id === id);
+    const eggBadge = `<span class="egg-size-badge egg-size-${(s.child.eggSize || "unknown").toLowerCase()}">🥚 ${EGG_SIZE_JA[s.child.eggSize] || "不明"}</span>`;
+    const finalNames = s.finalForTargetIds.map(id => { const p = PALS.find(x => x.id === id); return p ? p.name : id; });
+    const finalBadge = finalNames.length > 0 ? `<span class="badge required">🎯 目標: ${finalNames.join("、")}</span>` : "";
+    return `
+      <div class="route-step">
+        <div class="route-gen-badge">${i + 1}</div>
+        <div class="route-formula">
+          ${palTag(s.parentA)} ×
+          ${palTag(s.parentB)} →
+          ${palTag(s.child)}
+          ${eggBadge}
+          ${usesRequired ? '<span class="badge required">候補使用</span>' : ""}
+          ${finalBadge}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  const displayHatchHours = computeMultiCriticalPathHours(steps, ownedIdSet);
+  const summaryLine = `全${results.length}匹のうち到達できたのは<strong>${results.filter(r => r.found).length}匹</strong>。合計<strong>${steps.length}回の配合</strong>(孵化時間合計 目安 <strong>${formatHatchHours(displayHatchHours)}</strong>、並行実行前提)でまとめて用意できます。`;
+
+  box.innerHTML = `
+    <div class="card">
+      <h2>まとめて計算した結果</h2>
+      <ul class="hint" style="margin-bottom:10px;">${statusRows}</ul>
+      <p class="result-summary">${summaryLine}</p>
+      <div>${stepsHtml}</div>
+    </div>
+  `;
+}
+
 // 選んだスキルそれぞれについて、そのスキルを持たせている所持パル(候補グループ)を求め、
 // 「候補全体のうち少なくとも1匹を使うルート」と「選んだスキルそれぞれについて少なくとも1匹の候補を
 // 使うルート(スキルが複数あれば、その全スキル分を満たす)」の2つを計算しスキル継承タブ内に表示する。
@@ -1187,6 +1350,10 @@ function bindEvents() {
   document.getElementById("skillTargetSortAiueo").addEventListener("click", () => setTargetSort("aiueo"));
   document.getElementById("skillTargetSortNo").addEventListener("click", () => setTargetSort("no"));
   document.getElementById("btnSkillCalc").addEventListener("click", calcSkillRoute);
+  document.getElementById("skillMultiTargetSearch").addEventListener("input", (e) => {
+    renderSkillMultiTargetToggleList(e.target.value);
+  });
+  document.getElementById("btnSkillMultiCalc").addEventListener("click", calcSkillMultiRoute);
   document.getElementById("paldexSearch").addEventListener("input", (e) => {
     renderPaldexList(e.target.value);
   });
@@ -1277,6 +1444,8 @@ function setTargetSort(mode) {
   renderTargetSelect(searchVal);
   const skillSearchVal = document.getElementById("skillTargetSearch") ? document.getElementById("skillTargetSearch").value : "";
   renderSkillTargetToggleList(skillSearchVal);
+  const skillMultiSearchVal = document.getElementById("skillMultiTargetSearch") ? document.getElementById("skillMultiTargetSearch").value : "";
+  renderSkillMultiTargetToggleList(skillMultiSearchVal);
 }
 
 // ---------- 配合ルート計算 ----------

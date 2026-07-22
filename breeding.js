@@ -464,6 +464,176 @@ function findBreedingRouteViaAll(pals, targetPal, ownedPals, requiredGroups, exa
   return { found: false, generations: maxGenerations, steps: [], reason: "not-found-within-limit" };
 }
 
+// findBreedingRouteViaの複数目標版。「牧場で飼育する複数種に、同じスキル系統を全員継承させたい」
+// といったケースのために、1回のBFSで複数のtargetPalsを同時に追いかける。
+// findBreedingRouteViaと同じ「経由必須パルを使ったか(with)/未使用か(without)」の2色の閉包を、
+// 1匹見つかった時点で止めずに全targetPalsが見つかる(またはこれ以上何も生まれなくなる/世代上限)まで
+// 育て続けるのがポイント。同じ1つの閉包を全targetで共有するため、あるtargetPalが先に"with"色で
+// 生まれれば、それ以降は他のtargetPalを作るための親としてそのまま再利用できる
+// (with×何か=常にwith行きなので、スキル継承済み扱いも自動的に引き継がれる)。
+// 戻り値:
+//   results: [{ targetPal, found, alreadyOwned, generation? }] targetPalsと同じ順
+//   steps: 全targetの依存を合成した1本の配合手順(世代の若い順、同じ祖先を複数targetが共有する場合は
+//          1回だけ登場する)。各stepの finalForTargetIds に「このstepの子がそのままtargetPalであるid」を入れる
+//          (中間素材としてのみ使われるstepは空配列)。
+function findBreedingRouteMultiVia(pals, targetPals, ownedPals, requiredPalIds, exampleMap = {}, maxGenerations = 10) {
+  const reqIdSet = new Set(requiredPalIds || []);
+  const makeResults = (mapFn) => targetPals.map(tp => mapFn(tp));
+
+  if (reqIdSet.size === 0 || ![...reqIdSet].some(id => ownedPals.some(p => p.id === id))) {
+    return { results: makeResults(tp => ({ targetPal: tp, found: false, alreadyOwned: false, reason: "required-pal-not-owned" })), steps: [] };
+  }
+  if (ownedPals.length === 0) {
+    return { results: makeResults(tp => ({ targetPal: tp, found: false, alreadyOwned: false, reason: "no-owned-pals" })), steps: [] };
+  }
+
+  const ownedIdSet = new Set(ownedPals.map(p => p.id));
+  const alreadyOwned = new Set(targetPals.filter(tp => ownedIdSet.has(tp.id)).map(tp => tp.id));
+  const remaining = new Set(targetPals.filter(tp => !ownedIdSet.has(tp.id)).map(tp => tp.id));
+  const foundAtGen = new Map();
+
+  const withoutIds = new Set(ownedPals.map(p => p.id));
+  const withIds = new Set();
+  const viaWithout = new Map();
+  const viaWith = new Map();
+  const stepsCostWithout = new Map(ownedPals.map(p => [p.id, 0]));
+  const stepsCostWith = new Map();
+  const genOf = new Map(); // "color:id" -> このパル(色)が最初に得られた世代(初期所持は0)
+  ownedPals.forEach(p => genOf.set("without:" + p.id, 0));
+
+  for (let gen = 1; gen <= maxGenerations && remaining.size > 0; gen++) {
+    const withoutPool = [...withoutIds].map(id => pals.find(p => p.id === id));
+    const withPool = [...withIds].map(id => pals.find(p => p.id === id));
+
+    const newWithout = [];
+    const newWithoutParents = new Map();
+    const newWith = [];
+    const newWithParents = new Map();
+
+    const considerWithout = (child, entry, cost) => {
+      const existing = newWithoutParents.get(child.id);
+      if (!existing || cost < existing.cost) {
+        if (!existing) newWithout.push(child);
+        newWithoutParents.set(child.id, { ...entry, cost });
+      }
+    };
+    const considerWith = (child, entry, cost) => {
+      const existing = newWithParents.get(child.id);
+      if (!existing || cost < existing.cost) {
+        if (!existing) newWith.push(child);
+        newWithParents.set(child.id, { ...entry, cost });
+      }
+    };
+
+    for (let i = 0; i < withoutPool.length; i++) {
+      for (let j = i; j < withoutPool.length; j++) {
+        const a = withoutPool[i], b = withoutPool[j];
+        const { child, childPower, exact, isExample, unknown } = breedOnce(pals, a, b, exampleMap);
+        if (unknown) continue;
+        const usesRequired = (reqIdSet.has(a.id) || reqIdSet.has(b.id)) && a.id !== b.id;
+        const entry = { parentA: a, parentAColor: "without", parentB: b, parentBColor: "without", childPower, exact, isExample };
+        const cost = stepsCostWithout.get(a.id) + stepsCostWithout.get(b.id) + 1;
+        if (usesRequired) {
+          if (!withIds.has(child.id)) considerWith(child, entry, cost);
+        } else {
+          if (!withoutIds.has(child.id)) considerWithout(child, entry, cost);
+        }
+      }
+    }
+
+    for (const a of withPool) {
+      for (const b of withoutPool) {
+        const { child, childPower, exact, isExample, unknown } = breedOnce(pals, a, b, exampleMap);
+        if (unknown) continue;
+        if (withIds.has(child.id)) continue;
+        const cost = stepsCostWith.get(a.id) + stepsCostWithout.get(b.id) + 1;
+        considerWith(child, { parentA: a, parentAColor: "with", parentB: b, parentBColor: "without", childPower, exact, isExample }, cost);
+      }
+    }
+
+    for (let i = 0; i < withPool.length; i++) {
+      for (let j = i; j < withPool.length; j++) {
+        const a = withPool[i], b = withPool[j];
+        const { child, childPower, exact, isExample, unknown } = breedOnce(pals, a, b, exampleMap);
+        if (unknown) continue;
+        if (withIds.has(child.id)) continue;
+        const cost = stepsCostWith.get(a.id) + stepsCostWith.get(b.id) + 1;
+        considerWith(child, { parentA: a, parentAColor: "with", parentB: b, parentBColor: "with", childPower, exact, isExample }, cost);
+      }
+    }
+
+    for (const c of newWithout) {
+      withoutIds.add(c.id);
+      const best = newWithoutParents.get(c.id);
+      viaWithout.set(c.id, best);
+      stepsCostWithout.set(c.id, best.cost);
+      genOf.set("without:" + c.id, gen);
+    }
+    for (const c of newWith) {
+      withIds.add(c.id);
+      const best = newWithParents.get(c.id);
+      viaWith.set(c.id, best);
+      stepsCostWith.set(c.id, best.cost);
+      genOf.set("with:" + c.id, gen);
+    }
+
+    for (const id of [...remaining]) {
+      if (withIds.has(id)) {
+        foundAtGen.set(id, gen);
+        remaining.delete(id);
+      }
+    }
+
+    if (newWithout.length === 0 && newWith.length === 0) break;
+  }
+
+  // 見つかった全targetの依存を合成する。同じ祖先を複数targetが共有していても、
+  // neededKeysの重複チェックにより1回しか辿らない(=無駄な再計算をしない)。
+  const neededKeys = new Set();
+  function markNeeded(id, color) {
+    const key = color + ":" + id;
+    if (neededKeys.has(key)) return;
+    neededKeys.add(key);
+    const via = color === "with" ? viaWith.get(id) : viaWithout.get(id);
+    if (!via) return;
+    markNeeded(via.parentA.id, via.parentAColor);
+    markNeeded(via.parentB.id, via.parentBColor);
+  }
+  for (const tp of targetPals) {
+    if (foundAtGen.has(tp.id)) markNeeded(tp.id, "with");
+  }
+
+  const entries = [];
+  for (const key of neededKeys) {
+    const sep = key.indexOf(":");
+    const color = key.slice(0, sep);
+    const id = Number(key.slice(sep + 1));
+    const via = color === "with" ? viaWith.get(id) : viaWithout.get(id);
+    if (!via) continue; // 初期所持パルはstepなし
+    entries.push({ gen: genOf.get(key) || 0, id, color, via });
+  }
+  entries.sort((x, y) => x.gen - y.gen || x.id - y.id);
+
+  const targetIdSet = new Set(targetPals.map(tp => tp.id));
+  const steps = entries.map(e => ({
+    parentA: e.via.parentA,
+    parentB: e.via.parentB,
+    child: pals.find(p => p.id === e.id),
+    childPower: e.via.childPower,
+    exact: e.via.exact,
+    isExample: e.via.isExample,
+    finalForTargetIds: (e.color === "with" && targetIdSet.has(e.id)) ? [e.id] : []
+  }));
+
+  const results = targetPals.map(tp => {
+    if (alreadyOwned.has(tp.id)) return { targetPal: tp, found: true, alreadyOwned: true };
+    if (foundAtGen.has(tp.id)) return { targetPal: tp, found: true, alreadyOwned: false, generation: foundAtGen.get(tp.id) };
+    return { targetPal: tp, found: false, alreadyOwned: false, reason: "not-found-within-limit" };
+  });
+
+  return { results, steps };
+}
+
 // タマゴサイズ別の孵化時間の目安(時間)。ユーザーのワールド設定に合わせた値。
 // 基準値(palworld.wiki.gg「Egg Incubator」記事、適温でない場合): Normal=6h, Large=36h, Huge=72h。
 // ユーザー環境ではHugeの実測値が2h(基準値の1/36)だったため、ワールド設定の孵化速度倍率が
@@ -784,7 +954,7 @@ function findBreedingRouteMinHatchTimeAll(pals, targetPal, ownedPals, exampleMap
 if (typeof module !== "undefined") {
   module.exports = {
     computeChildPower, findClosestPals, breedOnce, findBreedingCombos, findBreedingRoute, findBreedingRouteVia,
-    findBreedingRouteViaAll, EGG_HATCH_HOURS, getHatchHours, findBreedingRouteMinHatchTime,
+    findBreedingRouteViaAll, findBreedingRouteMultiVia, EGG_HATCH_HOURS, getHatchHours, findBreedingRouteMinHatchTime,
     findBreedingRouteMinHatchTimeAll, computeCriticalPathHours
   };
 }
