@@ -28,6 +28,11 @@ let SKILLS = []; // パッシブスキル一覧(出典: skills-data.json、gamew
 let palSkills = {};
 let selectedSkillIds = []; // スキル継承タブで選択中のスキルid配列(複数選択可、未選択は空配列)
 let selectedMultiTargetIds = []; // スキル継承タブ④「複数の作りたいパルをまとめて計算」で選択中のtargetパルid配列
+// スキル継承タブ③の「作りたいパル」選択・並び順は、配合ルート検索タブの③(selectedTargetId/targetSortMode)
+// とは独立させている(ユーザー要望: 2つの機能を混同しないようにしたい)。①②のスキル候補も
+// requiredPalIds(配合ルート検索タブの②)には書き込まない。
+let skillTargetId = null;
+let skillTargetSortMode = "aiueo";
 let ownedIds = new Set();
 let ownedSortMode = "aiueo"; // "aiueo" | "no"
 let targetSortMode = "aiueo";
@@ -468,8 +473,6 @@ function renderTargetSelect(filterText = "") {
         t.classList.toggle("on", Number(t.dataset.id) === selectedTargetId);
       });
       updateTargetSelected();
-      // スキル継承タブの③も同じselectedTargetIdを共有するため同期させる
-      renderSkillTargetToggleList(document.getElementById("skillTargetSearch") ? document.getElementById("skillTargetSearch").value : "");
     });
 
     const pinBtn = el.querySelector(".target-pin-btn");
@@ -687,7 +690,6 @@ function jumpToTargetFromPaldex(palId) {
   selectedTargetId = palId;
   document.getElementById("targetPalSelect").value = palId;
   renderTargetSelect(document.getElementById("targetSearch").value);
-  renderSkillTargetToggleList(document.getElementById("skillTargetSearch") ? document.getElementById("skillTargetSearch").value : "");
   switchView("breeding");
   document.getElementById("targetSelected").scrollIntoView({ behavior: "smooth", block: "center" });
 }
@@ -824,7 +826,8 @@ function renderComboResults() {
 // まとめて継承したい場合を踏まえた作り)。選んだスキルごとに候補グループを作り、
 // findBreedingRouteViaAll/findBreedingRouteMinHatchTimeAll(グループ内OR/グループ間AND)へ渡すことで
 // 「選んだスキルそれぞれについて少なくとも1匹の候補が使われるルート」を計算する。
-// 「候補全体のうちどれか1匹だけ使えばよい」ルートは既存の②(requiredPalIds、OR条件)をそのまま使う。
+// 「候補全体のうちどれか1匹だけ使えばよい」ルートは②のOR条件アルゴリズム(findBreedingRouteVia)を
+// そのまま使うが、状態(requiredPalIds)は共有せずcandidateIdsを直接渡す(タブ間を独立させるため)。
 
 // スキルのcategoryキー→日本語見出し。SKILLSのcategoryフィールド(work/combat)に対応する。
 const SKILL_CATEGORY_JA = { work: "作業系", combat: "戦闘系" };
@@ -970,8 +973,8 @@ function updateSkillPalTagCount(skillId) {
   el.textContent = `(${count}匹)`;
 }
 
-// ③作りたいパルを選択。③(配合ルート検索タブ)と同じselectedTargetIdを共有し、
-// 両方のリストが常に同じ選択状態を表示するよう互いに再描画し合う。
+// ③作りたいパルを選択。配合ルート検索タブの③(selectedTargetId)とは独立したskillTargetIdを使う
+// (スキル継承タブと配合ルート検索タブは別機能として完全に分離する、というユーザー要望による)。
 function renderSkillTargetToggleList(filterText = "") {
   const list = document.getElementById("skillTargetToggleList");
   let filtered = PALS;
@@ -984,19 +987,20 @@ function renderSkillTargetToggleList(filterText = "") {
     });
   }
 
-  const sorted = sortPals(filtered, targetSortMode);
+  const sorted = sortPals(filtered, skillTargetSortMode);
 
   list.innerHTML = sorted.map(p => `
-    <div class="owned-toggle ${selectedTargetId === p.id ? "on" : ""}" data-id="${p.id}">${p.name}</div>
+    <div class="owned-toggle ${skillTargetId === p.id ? "on" : ""}" data-id="${p.id}">${p.name}</div>
   `).join("");
 
   list.querySelectorAll(".owned-toggle").forEach(el => {
     el.addEventListener("click", () => {
       const id = Number(el.dataset.id);
-      selectedTargetId = selectedTargetId === id ? null : id;
-      document.getElementById("targetPalSelect").value = selectedTargetId || "";
-      renderTargetSelect(document.getElementById("targetSearch").value);
-      renderSkillTargetToggleList(document.getElementById("skillTargetSearch").value);
+      skillTargetId = skillTargetId === id ? null : id;
+      list.querySelectorAll(".owned-toggle").forEach(t => {
+        t.classList.toggle("on", Number(t.dataset.id) === skillTargetId);
+      });
+      updateSkillTargetSelected();
     });
   });
 
@@ -1006,8 +1010,8 @@ function renderSkillTargetToggleList(filterText = "") {
 function updateSkillTargetSelected() {
   const el = document.getElementById("skillTargetSelected");
   if (!el) return;
-  if (selectedTargetId) {
-    const pal = PALS.find(p => p.id === selectedTargetId);
+  if (skillTargetId) {
+    const pal = PALS.find(p => p.id === skillTargetId);
     el.textContent = pal ? `選択中: ${pal.name}` : "未選択";
   } else {
     el.textContent = "未選択";
@@ -1015,7 +1019,7 @@ function updateSkillTargetSelected() {
 }
 
 // ④「複数の作りたいパルをまとめて計算」(牧場で飼育する複数種に同じスキルを継承させたい、等)。
-// ③(単体、selectedTargetId)とは独立した複数選択リスト。findBreedingRouteMultiViaに渡し、
+// ③(単体、skillTargetId)とは独立した複数選択リスト。findBreedingRouteMultiViaに渡し、
 // 選んだ複数のtargetパルを1回のBFSでまとめて追いかけることで、あるtargetが先に生まれれば
 // それ以降は他のtargetを作るための親としてそのまま再利用できる(=まとめて計算する意味がある)。
 function renderSkillMultiTargetToggleList(filterText = "") {
@@ -1030,7 +1034,7 @@ function renderSkillMultiTargetToggleList(filterText = "") {
     });
   }
 
-  const sorted = sortPals(filtered, targetSortMode);
+  const sorted = sortPals(filtered, skillTargetSortMode);
 
   list.innerHTML = sorted.map(p => `
     <div class="owned-toggle ${selectedMultiTargetIds.includes(p.id) ? "on" : ""}" data-id="${p.id}">${p.name}</div>
@@ -1182,15 +1186,15 @@ function renderSkillMultiRouteResults(multi, ownedIdSet, requiredIds) {
 // 選んだスキルそれぞれについて、そのスキルを持たせている所持パル(候補グループ)を求め、
 // 「候補全体のうち少なくとも1匹を使うルート」と「選んだスキルそれぞれについて少なくとも1匹の候補を
 // 使うルート(スキルが複数あれば、その全スキル分を満たす)」の2つを計算しスキル継承タブ内に表示する。
-// あわせて②(requiredPalIds)にも候補全体を反映し、配合ルート検索タブ側とも状態を同期させておく
-// (そちらでピン留め等のフル機能付きで見たい場合にすぐ使えるように)。
+// 配合ルート検索タブの②(requiredPalIds)には反映しない(スキル継承タブと配合ルート検索タブは
+// 別機能として完全に独立させている、というユーザー要望による)。
 function calcSkillRoute() {
   const hint = document.getElementById("skillCalcHint");
   if (selectedSkillIds.length === 0) {
     hint.textContent = "①でスキルを選択してください。";
     return;
   }
-  if (!selectedTargetId) {
+  if (!skillTargetId) {
     hint.textContent = "③で作りたいパルを選択してください。";
     return;
   }
@@ -1209,14 +1213,17 @@ function calcSkillRoute() {
   hint.textContent = "";
 
   const candidateIds = [...new Set(groups.flat())];
-  requiredPalIds = candidateIds;
-  renderRequiredToggleList();
 
-  const targetPal = PALS.find(p => p.id === selectedTargetId);
+  const targetPal = PALS.find(p => p.id === skillTargetId);
   const owned = PALS.filter(p => ownedIds.has(p.id));
   const availableOwned = owned.filter(p => !excludedIds.has(p.id));
 
-  let routeAny = computeRoute(targetPal, owned); // 既存のOR条件(グローバルrequiredPalIds/routeModeに従う、候補全体のどれか1匹)
+  // 配合ルート検索タブの②(requiredPalIds)は書き換えない(スキル継承タブと配合ルート検索タブは
+  // 独立させる、というユーザー要望による)。OR版はcomputeRoute(グローバルrequiredPalIds依存)を
+  // 使わず、candidateIdsを直接渡すfindBreedingRouteVia系をここで呼ぶ。
+  let routeAny = routeMode === "hatchtime"
+    ? findBreedingRouteMinHatchTime(PALS, targetPal, availableOwned, BREEDING_EXAMPLES, candidateIds)
+    : findBreedingRouteVia(PALS, targetPal, availableOwned, candidateIds, BREEDING_EXAMPLES, 10);
   let routeAllSkills = routeMode === "hatchtime"
     ? findBreedingRouteMinHatchTimeAll(PALS, targetPal, availableOwned, BREEDING_EXAMPLES, groups)
     : findBreedingRouteViaAll(PALS, targetPal, availableOwned, groups, BREEDING_EXAMPLES, 10);
@@ -1231,7 +1238,10 @@ function calcSkillRoute() {
     const availableWithoutTarget = ownedWithoutTarget.filter(p => !excludedIds.has(p.id));
     const groupsWithoutTarget = groups.map(g => g.filter(id => id !== targetPal.id));
     if (routeAny.reason === "already-owned" && ownedWithoutTarget.length > 0) {
-      routeAny = computeRoute(targetPal, ownedWithoutTarget);
+      const availableWithoutTargetForAny = ownedWithoutTarget.filter(p => !excludedIds.has(p.id));
+      routeAny = routeMode === "hatchtime"
+        ? findBreedingRouteMinHatchTime(PALS, targetPal, availableWithoutTargetForAny, BREEDING_EXAMPLES, candidateIds)
+        : findBreedingRouteVia(PALS, targetPal, availableWithoutTargetForAny, candidateIds, BREEDING_EXAMPLES, 10);
     }
     if (routeAllSkills.reason === "already-owned" && availableWithoutTarget.length > 0) {
       routeAllSkills = routeMode === "hatchtime"
@@ -1351,8 +1361,8 @@ function bindEvents() {
   document.getElementById("skillTargetSearch").addEventListener("input", (e) => {
     renderSkillTargetToggleList(e.target.value);
   });
-  document.getElementById("skillTargetSortAiueo").addEventListener("click", () => setTargetSort("aiueo"));
-  document.getElementById("skillTargetSortNo").addEventListener("click", () => setTargetSort("no"));
+  document.getElementById("skillTargetSortAiueo").addEventListener("click", () => setSkillTargetSort("aiueo"));
+  document.getElementById("skillTargetSortNo").addEventListener("click", () => setSkillTargetSort("no"));
   document.getElementById("btnSkillCalc").addEventListener("click", calcSkillRoute);
   document.getElementById("skillMultiTargetSearch").addEventListener("input", (e) => {
     renderSkillMultiTargetToggleList(e.target.value);
@@ -1436,16 +1446,20 @@ function setOwnedSort(mode) {
   renderOwnedToggleList(document.getElementById("ownedSearch").value);
 }
 
-// ③(配合ルート検索タブ)とスキル継承タブの③は同じselectedTargetId/targetSortModeを共有するため、
-// どちらの並び順ボタンを押しても両方のリストとボタン表示を同期させる。
+// 配合ルート検索タブの③専用(スキル継承タブとは独立)。
 function setTargetSort(mode) {
   targetSortMode = mode;
   document.getElementById("targetSortAiueo").classList.toggle("on", mode === "aiueo");
   document.getElementById("targetSortNo").classList.toggle("on", mode === "no");
-  document.getElementById("skillTargetSortAiueo").classList.toggle("on", mode === "aiueo");
-  document.getElementById("skillTargetSortNo").classList.toggle("on", mode === "no");
   const searchVal = document.getElementById("targetSearch") ? document.getElementById("targetSearch").value : "";
   renderTargetSelect(searchVal);
+}
+
+// スキル継承タブ専用(③④で共有、配合ルート検索タブとは独立)。
+function setSkillTargetSort(mode) {
+  skillTargetSortMode = mode;
+  document.getElementById("skillTargetSortAiueo").classList.toggle("on", mode === "aiueo");
+  document.getElementById("skillTargetSortNo").classList.toggle("on", mode === "no");
   const skillSearchVal = document.getElementById("skillTargetSearch") ? document.getElementById("skillTargetSearch").value : "";
   renderSkillTargetToggleList(skillSearchVal);
   const skillMultiSearchVal = document.getElementById("skillMultiTargetSearch") ? document.getElementById("skillMultiTargetSearch").value : "";
@@ -1502,7 +1516,6 @@ function jumpToTarget(palId) {
   selectedTargetId = palId;
   document.getElementById("targetPalSelect").value = palId;
   renderTargetSelect(document.getElementById("targetSearch").value);
-  renderSkillTargetToggleList(document.getElementById("skillTargetSearch") ? document.getElementById("skillTargetSearch").value : "");
 
   const targetPal = PALS.find(p => p.id === palId);
   const owned = PALS.filter(p => ownedIds.has(p.id));
